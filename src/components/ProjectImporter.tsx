@@ -10,8 +10,20 @@ import { mergeProjects, parseProjectsCsv } from "@/lib/projectsCsv";
 import { loadProjectDraft, parseBackup, saveProjectDraft } from "@/lib/storage";
 import type { ProjectMapping } from "@/lib/types";
 import { uid } from "@/lib/uid";
+import { isExcelFile, parseProjectorReport, readWorkbook, reportFilters, type ProjectorReport, type ReportOption, type WorkbookSheet } from "@/lib/projector/excel";
 
-type Method = "screenshot" | "paste" | "file";
+type Method = "excel" | "screenshot" | "paste" | "file";
+
+interface ReportSummary {
+  fileName: string;
+  sheetName: string;
+  rowCount: number;
+  dateRange?: string;
+  filters: ReportOption[];
+  locations: { name: string; count: number }[];
+  warnings: string[];
+  skipped: number;
+}
 
 interface ReviewState {
   source: ProjectMapping["source"];
@@ -19,6 +31,9 @@ interface ReviewState {
   orphans: ParseResult["orphanTasks"];
   loose: ParseResult["looseLines"];
   rawText: ParseResult["rawText"];
+  report?: ReportSummary;
+  /** Default BigTime location chosen from the report's Work Location values. */
+  defaultLocation?: string;
 }
 
 export interface ImporterResult {
@@ -29,7 +44,7 @@ export interface ImporterResult {
 }
 
 /** First-time and incremental project import: screenshots (local OCR), pasted text, or files. */
-export function ProjectImporter({ onSaved, compact = false, initialMethod = "screenshot", onReviewing }: { onSaved?: (r: ImporterResult) => void; compact?: boolean; initialMethod?: Method; onReviewing?: (reviewing: boolean) => void }) {
+export function ProjectImporter({ onSaved, compact = false, initialMethod = "excel", onReviewing }: { onSaved?: (r: ImporterResult) => void; compact?: boolean; initialMethod?: Method; onReviewing?: (reviewing: boolean) => void }) {
   const { projects, setProjects, settings, setSettings, setRules } = useStore();
   const [method, setMethod] = useState<Method>(initialMethod);
   const [review, setReview] = useState<ReviewState | null>(null);
@@ -68,6 +83,8 @@ export function ProjectImporter({ onSaved, compact = false, initialMethod = "scr
     const incoming = rows.filter((r) => r.approved).map((r) => toMapping(r, review?.source));
     const m = mergeProjects(projects, incoming);
     setProjects(m.projects);
+    const chosen = review?.defaultLocation;
+    if (chosen && chosen !== settings.defaultLocation) setSettings((prev) => ({ ...prev, defaultLocation: chosen }));
     setReview(null);
     saveProjectDraft(null); // the parent may unmount this component right away
     setDone(`Saved: ${m.added} new project${m.added === 1 ? "" : "s"}${m.updated ? `, ${m.updated} updated` : ""}${m.newTasks ? ` (${m.newTasks} task${m.newTasks === 1 ? "" : "s"} added)` : ""}. Your existing projects were kept.`);
@@ -81,10 +98,11 @@ export function ProjectImporter({ onSaved, compact = false, initialMethod = "scr
   return (
     <div className="stack">
       {!compact && (
-        <div className="method-grid" role="tablist" aria-label="How to import projects">
+        <div className="method-grid four" role="tablist" aria-label="How to import projects">
           {(
             [
-              ["screenshot", "📸", "Scan screenshots", "Recommended · reads Projector screenshots on this device"],
+              ["excel", "📊", "Upload Projector Excel report", "Recommended · the original .xlsx from Projector"],
+              ["screenshot", "📸", "Scan screenshots", "Reads Projector screenshots on this device"],
               ["paste", "📋", "Paste Projector text", "Fastest when Projector lets you select text"],
               ["file", "🗂️", "Import a file", "Backup .json or projects .csv"],
             ] as const
@@ -97,6 +115,29 @@ export function ProjectImporter({ onSaved, compact = false, initialMethod = "scr
           ))}
         </div>
       )}
+      {method === "excel" && (
+        <ExcelImport
+          onReport={(report, fileName) => {
+            setError(null);
+            setDone(null);
+            if (!report.projects.length) {
+              setError("The report has no project rows. Check the report's date range and filters in Projector, then export again.");
+              return;
+            }
+            const preferred = settings.defaultLocation && report.locations.some((l) => l.name === settings.defaultLocation) ? settings.defaultLocation : report.locations[0]?.name;
+            setReview({
+              source: "excel",
+              rows: report.projects.map((p) => ({ ...p, approved: false, location: report.locations.length > 1 ? p.location : undefined })),
+              orphans: [],
+              loose: [],
+              rawText: [],
+              report: { fileName, sheetName: report.sheetName, rowCount: report.rowCount, dateRange: report.dateRange, filters: reportFilters(report.options), locations: report.locations, warnings: report.warnings, skipped: report.skippedRows.length },
+              defaultLocation: preferred,
+            });
+          }}
+          onError={setError}
+        />
+      )}
       {method === "screenshot" && <ScreenshotScan keepNumbers={settings.keepTaskNumbers} onResult={(r) => startReview(r, "screenshot")} onError={setError} />}
       {method === "paste" && <PasteText keepNumbers={settings.keepTaskNumbers} onResult={(r) => startReview(r, "paste")} />}
       {method === "file" && (
@@ -105,7 +146,7 @@ export function ProjectImporter({ onSaved, compact = false, initialMethod = "scr
           onRows={(rows) => setReview({ source: "file", rows, orphans: [], loose: [], rawText: [] })}
           onRestore={(b) => {
             setProjects(b.projects);
-            setSettings({ ...b.settings, onboarding: settings.onboarding, onboardingStep: settings.onboardingStep });
+            setSettings((prev) => ({ ...b.settings, onboarding: prev.onboarding, onboardingStep: prev.onboardingStep }));
             setRules(b.rules ?? []);
             setDone(`Restored ${b.projects.length} projects, your settings${b.rules?.length ? ` and ${b.rules.length} remembered matches` : ""} from the backup.`);
             onSaved?.({ added: b.projects.length, updated: 0, newTasks: 0, saved: b.projects });
@@ -114,12 +155,70 @@ export function ProjectImporter({ onSaved, compact = false, initialMethod = "scr
         />
       )}
       <label className="check small">
-        <input type="checkbox" checked={settings.keepTaskNumbers} onChange={(e) => setSettings({ ...settings, keepTaskNumbers: e.target.checked })} />
+        <input type="checkbox" checked={settings.keepTaskNumbers} onChange={(e) => setSettings((prev) => ({ ...prev, keepTaskNumbers: e.target.checked }))} />
         <span>Keep Projector&apos;s task numbers (e.g. “2 Planning”). Leave this off unless your BigTime import requires them — the tested BigTime import uses “Planning”.</span>
       </label>
       {error && <Notice tone="error" title="Couldn't import projects">{error}</Notice>}
       {done && <Notice tone="success" title="Projects saved">{done}</Notice>}
     </div>
+  );
+}
+
+/* ----------------------------- Projector Excel report ----------------------------- */
+
+function ExcelImport({ onReport, onError }: { onReport: (r: ProjectorReport, fileName: string) => void; onError: (e: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<{ sheets: WorkbookSheet[]; fileName: string; employees: string[] } | null>(null);
+  const [employee, setEmployee] = useState("");
+  async function take(files: File[]) {
+    onError(null);
+    const f = files.find(isExcelFile) ?? files[0];
+    if (!f || !isExcelFile(f)) {
+      onError("Choose the .xlsx (or .xlsm) file exactly as downloaded from Projector. Older .xls and .csv files aren't Projector Excel reports.");
+      return;
+    }
+    if (f.size > 25 * 1024 * 1024) {
+      onError("That file is larger than 25 MB. Export a shorter date range from Projector.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const sheets = await readWorkbook(await f.arrayBuffer());
+      const first = parseProjectorReport(sheets);
+      if (first.employees.length > 1) {
+        setPending({ sheets, fileName: f.name, employees: first.employees });
+        return;
+      }
+      onReport(first, f.name);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Upload your Projector Excel report" subtitle="The original .xlsx downloaded from Projector — don't open, convert or edit it. It's read in this browser only; nothing is uploaded.">
+      <Dropzone accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" onFiles={take} label={busy ? "Reading report…" : <><strong>Drop the Projector report (.xlsx)</strong> or click to choose</>} hint="Needs the columns Project and Task Name (Work Location and Role are optional). Macros are never run." icon="📊" />
+      {pending && (
+        <div className="editor mt">
+          <label className="field narrow">
+            <span>This report has time for {pending.employees.length} people. Which one are you?</span>
+            <select value={employee} onChange={(e) => setEmployee(e.target.value)}>
+              <option value="">Choose…</option>
+              {pending.employees.map((n) => <option key={n}>{n}</option>)}
+            </select>
+          </label>
+          <Button variant="primary" className="mt" disabled={!employee} onClick={() => {
+            onReport(parseProjectorReport(pending.sheets, { employee }), pending.fileName);
+            setPending(null);
+          }}>Use my rows</Button>
+        </div>
+      )}
+      <details className="help">
+        <summary>Which report should I download?</summary>
+        <p className="small">A Projector <strong>Time Card Report</strong> filtered to yourself, with the columns <em>Project</em>, <em>Role</em>, <em>Work Location</em> and <em>Task Name</em>, covering a recent period long enough to include every project you work on (e.g. the last 3–6 months). Export it to Excel and upload the file as-is. See Help for step-by-step instructions.</p>
+      </details>
+    </Card>
   );
 }
 
@@ -230,6 +329,10 @@ function PasteText({ onResult, keepNumbers }: { onResult: (r: ParseResult) => vo
 function FileImport({ onRows, onRestore, onError, keepNumbers }: { onRows: (r: ReviewProject[]) => void; onRestore: (b: ReturnType<typeof parseBackup>) => void; onError: (e: string | null) => void; keepNumbers: boolean }) {
   async function take(files: File[]) {
     onError(null);
+    if (isExcelFile(files[0])) {
+      onError("That's an Excel file — use “Upload Projector Excel report” above.");
+      return;
+    }
     try {
       const text = await readText(files[0]);
       if (/^\s*\{/.test(text)) {
@@ -281,6 +384,8 @@ function ProjectReview({ state, setState, onSave, onCancel, keepNumbers, existin
   const dupCodes = new Set(rows.map((r) => r.code.toLowerCase()).filter((c, i, a) => c && a.indexOf(c) !== i));
   const [raw, setRaw] = useState(state.rawText.map((r) => `${r.text}`).join("\n\n"));
 
+  const report = state.report;
+  const multiLoc = (report?.locations.length ?? 0) > 1;
   const addTask = (key: string, task: ParsedTask) => set(rows.map((r) => (r.key === key && !r.tasks.some((t) => t.name.toLowerCase() === task.name.toLowerCase()) ? { ...r, tasks: [...r.tasks, task] } : r)));
 
   return (
@@ -290,6 +395,35 @@ function ProjectReview({ state, setState, onSave, onCancel, keepNumbers, existin
         {state.orphans.length ? ` · ${state.orphans.length} task${state.orphans.length === 1 ? "" : "s"} without a project` : ""}
         {state.loose.length ? ` · ${state.loose.length} unrecognised line${state.loose.length === 1 ? "" : "s"}` : ""}. Nothing is saved until you click Save.
       </Notice>
+
+      {report && (
+        <Card title="Projector report" subtitle={`${report.fileName} · sheet “${report.sheetName}” · ${report.rowCount} time card row${report.rowCount === 1 ? "" : "s"}${report.dateRange ? ` · ${report.dateRange}` : ""}`}>
+          <Notice tone="warning" title="This is a history of your time cards, not your full assignment list">
+            Projects or tasks you haven&apos;t charged time to in this report&apos;s date range{report.dateRange ? ` (${report.dateRange})` : ""} won&apos;t appear. That&apos;s fine — upload a newer or longer report later, or add a project when a meeting needs it. Nothing is guessed.
+          </Notice>
+          {report.filters.length > 0 && (
+            <details className="help">
+              <summary>Report filters ({report.filters.length})</summary>
+              <ul className="tight small">{report.filters.map((f, i) => <li key={i}>{f.label}{f.value ? `: ${f.value}` : ""}</li>)}</ul>
+            </details>
+          )}
+          {report.warnings.map((w) => <Notice key={w} tone="warning">{w}</Notice>)}
+          {report.locations.length > 0 && (
+            <fieldset className="field mt">
+              <span>Default BigTime location (from the report&apos;s Work Location column)</span>
+              <div className="row wrap gap">
+                {report.locations.map((l) => (
+                  <label key={l.name} className="check">
+                    <input type="radio" name="report-location" checked={state.defaultLocation === l.name} onChange={() => setState({ ...state, defaultLocation: l.name })} />
+                    <span>{l.name} <span className="muted small">({l.count} time card{l.count === 1 ? "" : "s"})</span></span>
+                  </label>
+                ))}
+              </div>
+              {multiLoc && <span className="small muted">Several locations were used — each project below defaults to its most common one; change any of them, or edit individual entries later.</span>}
+            </fieldset>
+          )}
+        </Card>
+      )}
 
       <div className="toolbar">
         <div className="segmented small" role="tablist" aria-label="Filter detected projects">
@@ -312,6 +446,7 @@ function ProjectReview({ state, setState, onSave, onCancel, keepNumbers, existin
               <th>Project code</th>
               <th>Tasks</th>
               <th>Type</th>
+              {multiLoc && <th>Location</th>}
               <th>Status</th>
               <th aria-label="Actions" />
             </tr>
@@ -357,7 +492,16 @@ function ProjectReview({ state, setState, onSave, onCancel, keepNumbers, existin
                       <option value="billable">Billable</option>
                       <option value="internal">Internal</option>
                     </select>
+                    {r.roles && r.roles.length > 0 && <div className="row-note muted" title="Role is kept for reference only; it is not exported.">Role: {r.roles.join(", ")}</div>}
                   </td>
+                  {multiLoc && (
+                    <td data-label="Location">
+                      <select value={r.location ?? ""} aria-label="Location for this project" onChange={(e) => upd(r.key, { location: e.target.value || undefined })}>
+                        <option value="">Default ({state.defaultLocation ?? "none"})</option>
+                        {report!.locations.map((l) => <option key={l.name} value={l.name}>{l.name}</option>)}
+                      </select>
+                    </td>
+                  )}
                   <td data-label="Status">
                     {status === "verified" ? <Badge tone="success">Verified</Badge> : <Badge tone="warning">Review</Badge>}
                     {r.approved && <div className="row-note text-success">✓ approved</div>}

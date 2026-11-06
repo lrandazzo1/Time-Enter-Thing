@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.1.0 — Native Projector Excel report import
+
+### Added
+- **Upload Projector Excel report** is now the primary way to import projects (first option in the setup wizard and on the Projects page). The original `.xlsx` (and `.xlsm`, data only — macros are never run) is read in the browser with `read-excel-file`; nothing is uploaded.
+- `src/lib/projector/excel.ts`: selects the `Report` sheet (or any sheet with *Project* + *Task Name* columns), finds the header row even below title rows, tolerates reordered/extra columns, grouped reports (project shown once per group) and total rows; extracts the **project code from the final parenthesised identifier** (exact value, leading zeros kept), the full project name and the client (spaced-separator split, never the first hyphen; unclear clients are flagged with the full name); keeps **task names exactly**; de-duplicates time-card rows by project code while collecting every distinct task; records **Role** as reference metadata only; collects **Work Location** counts.
+- Reads the `Options` sheet (Projector's one-statement-per-row format) to show the report's **date range** and filters, with a warning that a time-card report is history and may omit projects.
+- Location handling: the most common Work Location is suggested as the default; when a report has several, each project gets its own location (editable), used for its entries; individual entries stay editable.
+- Optional employee filter, shown only if a report actually contains an employee/staff column with several people.
+- Match step: **Upload newer Projector report** for an unrecognised meeting — saves new projects and new tasks without touching existing configuration.
+- Help/README: which Projector report to export and how.
+- Tests: Excel parsing (synthetic workbooks mirroring the real report, grouped layout, true `.xlsm`, non-report files, employee column), import → save → match → export with exact CSV, a local-only test for a real report, and a browser end-to-end test of the Excel onboarding.
+
+### Changed
+- Matching never assigns time just because your **own organisation's name** appears (e.g. “Client | OurFirm Working Session” when the internal project is named after your company); such meetings are offered as choices instead. Titles that say “internal” and mention a client are ambiguous (client vs internal) instead of billed to the client.
+- Projects store optional `location`, `roles` and `fullName`; backups and project CSVs include them; older backups still restore.
+- Settings updates during onboarding no longer overwrite each other.
+
+
 ## 2.0.0 — Timesheet Converter 2.0
 
 ### Removed

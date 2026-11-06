@@ -57,6 +57,14 @@ export interface ParsedProject {
   pages: string[];
   raw: string;
   issues: string[];
+  /** Excel report metadata (reference only; never exported). */
+  roles?: string[];
+  /** Work locations seen for this project, most frequent first. */
+  locations?: string[];
+  /** Location chosen for this project during review. */
+  location?: string;
+  /** Number of report rows (time cards) that referenced this project. */
+  rowCount?: number;
 }
 
 export interface OrphanTask {
@@ -95,7 +103,7 @@ const UI_NOISE = new Set(
 
 // Status badges Projector shows after a task (and common OCR readings of the small "LATE" pill).
 const STATUS_BADGE = /\s+(?:LATE|OVERDUE|NEW|CLOSED|INACTIVE|LOCKED|[(\[{]?L?ATE[)\]}]?|\(LATE\)|\[LATE\])$/;
-const INTERNAL_HINT = /\b(internal|non[- ]?billable|overhead|administrative|admin|bench|pto|paid time off|holiday|training|corporate)\b/i;
+export const INTERNAL_HINT = /\b(internal|non[- ]?billable|overhead|administrative|admin|bench|pto|paid time off|holiday|training|corporate)\b/i;
 
 /** Normalise OCR/copy artifacts: odd dashes/spaces, checkbox glyphs and bullets at the start. */
 export function cleanLine(s: string): string {

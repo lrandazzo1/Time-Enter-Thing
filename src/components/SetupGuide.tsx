@@ -18,7 +18,8 @@ const MAPPINGS: [string, string, string?][] = [
 
 const SECTIONS = [
   ["quick", "Quick start"],
-  ["projects", "Import projects from Projector"],
+  ["report", "Which Projector report to export"],
+  ["projects", "Other ways to import projects"],
   ["outlook", "Export your Outlook calendar"],
   ["bigtime", "Import the CSV into BigTime"],
   ["role", "Role and Rate Type"],
@@ -45,7 +46,7 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
           <div>
             <h3>First time (about 5 minutes)</h3>
             <ol className="guide-steps">
-              <li>Import your projects from Projector — screenshots or copied text (<button className="link" onClick={onProjects}>Projects</button>).</li>
+              <li>Download your Projector <strong>Time Card Report</strong> as Excel and upload it as-is (<button className="link" onClick={onProjects}>Projects</button>).</li>
               <li>Check the detected clients, codes and tasks, then save.</li>
               <li>Enter your BigTime location once.</li>
               <li>Import this week&apos;s Outlook calendar.</li>
@@ -67,10 +68,38 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
         </Notice>
       </Card>
 
-      <Card title="Import projects from Projector">
+      <Card title="Which Projector report to export">
+        <span id="help-report" className="anchor-target" />
+        <p>Timesheet Converter reads the <strong>original Excel file</strong> of a Projector <strong>Time Card Report</strong>. One report gives it every project code, project name and task you have charged time to, plus your work location.</p>
+        <ol className="guide-steps">
+          <li>In Projector, open <strong>Reports</strong> and run a <strong>Time Card Report</strong> (you can save it, e.g. as “Timesheet Converter”, to reuse it).</li>
+          <li>Include these columns: <code>Project</code>, <code>Task Name</code>, <code>Work Location</code> and (optional) <code>Role</code>. Other columns are ignored.</li>
+          <li>Filter it to <strong>yourself</strong> (the resource filter / resource search string) so only your projects are included.</li>
+          <li>Pick a date range long enough to cover every project you&apos;re working on — the last <strong>3–6 months</strong> works well. Including approved time cards is enough.</li>
+          <li>Export to <strong>Excel</strong> and upload the downloaded <code>.xlsx</code> on <em>Projects → Import projects → Upload Projector Excel report</em>. Don&apos;t open, convert or edit it first.</li>
+        </ol>
+        <div className="table-wrap mt">
+          <table className="map-table">
+            <thead><tr><th>Report column</th><th>Example</th><th>Used as</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Project</strong></td><td><code>Acme Components - Adaptive Planning - Implementation (P001234-001)</code></td><td>Project code (from the final parentheses), full project name, and client name</td></tr>
+              <tr><td><strong>Task Name</strong></td><td><code>Planning</code></td><td>The project&apos;s tasks, exactly as written</td></tr>
+              <tr><td><strong>Work Location</strong></td><td><code>Main Office</code></td><td>Suggested BigTime location</td></tr>
+              <tr className="muted"><td><strong>Role</strong></td><td><code>Consultant</code></td><td>Reference only — never exported (set Role in BigTime&apos;s Review Time step)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <Notice tone="warning" title="A time card report is history, not your assignment list">
+          It only contains projects and tasks you charged time to in the chosen date range. A brand-new project won&apos;t be in it yet — when a meeting needs it, the Match step lets you upload a newer report or add that one project. The app shows the report&apos;s date range and filters (from its <em>Options</em> sheet) so you can check what was included.
+        </Notice>
+        <p className="small muted">Report and menu names can differ slightly between Projector versions; any report export with a <em>Project</em> column (name with the code in parentheses) and a <em>Task Name</em> column works. Projects you add later are merged — nothing you saved is deleted.</p>
+      </Card>
+
+      <Card title="Other ways to import projects">
         <span id="help-projects" className="anchor-target" />
         <p>You only need the projects you currently work on. Add more any time — new imports are merged with what you have.</p>
-        <h3>Option A — copy text (fastest when it works)</h3>
+        <p>If you can&apos;t export the Excel report, these work too.</p>
+        <h3>Option A — copy text</h3>
         <ol className="guide-steps">
           <li>Open the Projector screen that lists your assigned projects and tasks (the project/task picker on your timesheet, or your project assignments list).</li>
           <li><strong>Expand every project</strong> so its numbered tasks are visible.</li>

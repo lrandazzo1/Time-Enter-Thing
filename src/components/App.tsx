@@ -79,12 +79,12 @@ function Shell() {
           justCompleted ? (
             <SetupComplete onGuide={() => { setJustCompleted(false); go("help"); }} onContinue={() => { setJustCompleted(false); go("home"); }} />
           ) : onboarding ? (
-            <Onboarding onGuide={() => go("help")} onComplete={() => { setSettings({ ...settings, onboarding: "done", onboardingStep: 5 }); setJustCompleted(true); window.scrollTo({ top: 0 }); }} />
+            <Onboarding onGuide={() => go("help")} onComplete={() => { setSettings((prev) => ({ ...prev, onboarding: "done", onboardingStep: 5 })); setJustCompleted(true); window.scrollTo({ top: 0 }); }} />
           ) : (
             <GenerateTimesheet onGuide={() => go("help")} />
           )
         ) : tab === "projects" ? (
-          <ProjectsPage onRestartSetup={() => { setSettings({ ...settings, onboarding: "active", onboardingStep: 1 }); go("home"); }} />
+          <ProjectsPage onRestartSetup={() => { setSettings((prev) => ({ ...prev, onboarding: "active", onboardingStep: 1 })); go("home"); }} />
         ) : (
           <SetupGuide onStart={() => go("home")} onProjects={() => go("projects")} />
         )}

@@ -78,7 +78,9 @@ export function sanitizeProject(p: unknown, makeId: () => string): ProjectMappin
     defaultTask: tasks.includes(defaultTask) ? defaultTask : "",
     billable: o.billable !== false,
     fullName: str(o.fullName) || undefined,
-    source: (["screenshot", "paste", "file", "manual"] as const).find((s) => s === o.source),
+    source: (["screenshot", "paste", "file", "manual", "excel"] as const).find((s) => s === o.source),
+    location: str(o.location).trim() || undefined,
+    roles: Array.isArray(o.roles) ? (o.roles as unknown[]).map(str).filter(Boolean).slice(0, 20) : undefined,
   };
 }
 

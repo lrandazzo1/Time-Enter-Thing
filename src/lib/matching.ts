@@ -130,11 +130,23 @@ export function matchEvent(title: string, description: string, projects: Project
     // An internal project's client name is usually your own company, which appears in many client
     // meeting titles ("Acme | Our Firm Working Session"). If it only matched by that name and a billable
     // client also matched, prefer the client. An explicit alias (e.g. "INTERNAL") still counts.
-    if (hits.some((p) => p.billable)) {
-      hits = hits.filter((p) => p.billable || [p.code, ...p.aliases].some((n) => n.trim().length >= 2 && containsPhrase(text, n)));
+    const explicitly = (p: ProjectMapping) => [p.code, ...p.aliases].some((n) => n.trim().length >= 2 && containsPhrase(text, n));
+    const weak = hits.filter((p) => !p.billable && !explicitly(p));
+    if (hits.some((p) => p.billable)) hits = hits.filter((p) => p.billable || explicitly(p));
+    else if (hits.length && hits.every((p) => weak.includes(p))) {
+      // Only your own company's name appears — that alone never decides where time goes.
+      notes.push({ code: "ambiguous-project", level: "warning", message: `Mentions ${weak.map((p) => p.client).join(" / ")} (your own organisation?) but no client — choose the project, or the internal project if this was internal time.` });
+      return { projectId: null, task: "", description: t, notes, candidates: weak.map((p) => p.id) };
     }
     // Prefer the most specific (longest) name when one hit's name contains another's.
-    const unique = dedupeBySpecificity(hits, text);
+    let unique = dedupeBySpecificity(hits, text);
+    // "INTERNAL: Acme sync" — an internal meeting about a client may not be billable to that client.
+    const internals = projects.filter((p) => !p.billable);
+    if (unique.length === 1 && unique[0].billable && /\binternal\b/i.test(t) && internals.length) {
+      unique = [unique[0], ...internals.filter((p) => !unique.includes(p))];
+      notes.push({ code: "ambiguous-project", level: "warning", message: `Says “internal” — bill it to ${unique[0].client}, or record it as internal time?` });
+      return { projectId: null, task: "", description: t, notes, candidates: unique.map((p) => p.id) };
+    }
     if (unique.length === 1) {
       const project = unique[0];
       const mentioned = tasksMentioned(t + " " + description, project);
@@ -236,9 +248,11 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
       candidates = byDomain.map((p) => p.id);
     }
   }
-  // 5. fuzzy suggestion — never applied automatically
-  if (!projectId && !candidates) {
-    const hit = bestFuzzy(cleanTitle(ev.title), projects, (p) => [p.client, ...p.aliases]);
+  // 5. fuzzy suggestion — never applied automatically (also when only your own internal project was mentioned)
+  const onlyInternal = candidates?.every((id) => projects.find((p) => p.id === id)?.billable === false);
+  if (!projectId && (!candidates || onlyInternal)) {
+    const pool = onlyInternal ? projects.filter((p) => p.billable) : projects;
+    const hit = bestFuzzy(cleanTitle(ev.title), pool, (p) => [p.client, ...p.aliases]);
     if (hit) {
       suggestion = { projectId: hit.item.id, reason: hit.reason };
       notes.push({ code: "fuzzy-suggestion", level: "warning", message: `Possibly ${hit.item.client} (${hit.reason}) — confirm or choose another project.` });
@@ -295,7 +309,7 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
     projectId,
     task,
     description: m.description,
-    location: settings.defaultLocation,
+    location: (projectId && projects.find((p) => p.id === projectId)?.location) || settings.defaultLocation,
     included,
     excludeReason,
     status: ev.status,

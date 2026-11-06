@@ -29,7 +29,7 @@ export function Onboarding({ onGuide, onComplete }: { onGuide: () => void; onCom
   const step = Math.min(5, Math.max(1, settings.onboardingStep || 1));
   const [reviewing, setReviewing] = useState(false);
   const setStep = (n: number) => {
-    setSettings({ ...settings, onboardingStep: n });
+    setSettings((prev) => ({ ...prev, onboardingStep: n }));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const shown = step === 1 && reviewing ? 2 : step;
@@ -41,7 +41,7 @@ export function Onboarding({ onGuide, onComplete }: { onGuide: () => void; onCom
           <h1>Welcome to Timesheet Converter</h1>
           <p className="muted">A one-time setup (about five minutes). Everything stays on this device; no account needed.</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setSettings({ ...settings, onboarding: "skipped" })}>Skip setup</Button>
+        <Button variant="ghost" size="sm" onClick={() => setSettings((prev) => ({ ...prev, onboarding: "skipped" }))}>Skip setup</Button>
       </div>
       <ol className="wizard" aria-label="Setup progress">
         {STEPS.map((label, i) => (
@@ -56,7 +56,7 @@ export function Onboarding({ onGuide, onComplete }: { onGuide: () => void; onCom
         <>
           {!reviewing && (
             <Notice tone="info" title="Step 1 — bring in your Projector projects">
-              The quickest way: in Projector, expand your assigned projects, take one or more screenshots, and drop them below. You only need the projects you currently work on — you can add more any time.
+              Easiest: download a <strong>Time Card Report</strong> from Projector as Excel (filtered to you, covering the last few months) and drop the original .xlsx below. Projects, codes, tasks and your work location are read automatically. You can add more projects any time.
             </Notice>
           )}
           <ProjectImporter onReviewing={setReviewing} onSaved={() => setStep(3)} />
@@ -73,13 +73,13 @@ export function Onboarding({ onGuide, onComplete }: { onGuide: () => void; onCom
         <Card title="Step 3 — your BigTime location" subtitle="Used on every time entry. Type it exactly as it appears in BigTime's Location list.">
           <label className="field narrow">
             <span>Default location</span>
-            <input autoFocus value={settings.defaultLocation} placeholder="e.g. Main Office" onChange={(e) => setSettings({ ...settings, defaultLocation: e.target.value })} />
+            <input autoFocus value={settings.defaultLocation} placeholder="e.g. Main Office" onChange={(e) => setSettings((prev) => ({ ...prev, defaultLocation: e.target.value }))} />
           </label>
           <p className="small muted mt">Not sure? Open BigTime&apos;s Import Time → Review time screen and look at the Location dropdown. You can change this later on the Projects page.</p>
           <div className="row wrap gap-sm mt">
             <Button onClick={() => setStep(1)}>← Back</Button>
             <Button variant="primary" disabled={settings.locationRequired && !settings.defaultLocation.trim()} onClick={() => setStep(4)}>Continue →</Button>
-            {!settings.defaultLocation.trim() && <Button variant="ghost" onClick={() => setSettings({ ...settings, locationRequired: false, onboardingStep: 4 })}>My BigTime doesn&apos;t use Location</Button>}
+            {!settings.defaultLocation.trim() && <Button variant="ghost" onClick={() => setSettings((prev) => ({ ...prev, locationRequired: false, onboardingStep: 4 }))}>My BigTime doesn&apos;t use Location</Button>}
           </div>
         </Card>
       )}
@@ -90,7 +90,7 @@ export function Onboarding({ onGuide, onComplete }: { onGuide: () => void; onCom
           onGuide={onGuide}
           onStep={(s) => {
             const want = s <= 1 ? 4 : 5;
-            if (want !== step) setSettings({ ...settings, onboardingStep: want });
+            if (want !== step) setSettings((prev) => ({ ...prev, onboardingStep: want }));
           }}
           onExported={onComplete}
         />

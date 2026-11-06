@@ -111,7 +111,7 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
 
       {projects.length === 0 && (
         <Notice tone="info" title="No projects saved yet">
-          You can import your calendar now and add projects as you match each meeting, or import your Projector projects first on the <strong>Projects</strong> page.
+          You can import your calendar now and add projects as you match each meeting, or first upload your Projector Excel report on the <strong>Projects</strong> page.
         </Notice>
       )}
 
@@ -302,7 +302,7 @@ export function ManualEntry({ compact = false, onAdded }: { compact?: boolean; o
         projectId: projectId || null,
         task,
         description,
-        location: settings.defaultLocation,
+        location: project?.location || settings.defaultLocation,
         included: true,
         status: "busy",
         notes: [],

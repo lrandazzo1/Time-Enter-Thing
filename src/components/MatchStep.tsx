@@ -9,6 +9,7 @@ import { parseProjectorPages, parseProjectorText, type ParsedProject } from "@/l
 import { isValidCode } from "@/lib/projector/codes";
 import { mergeProjects } from "@/lib/projectsCsv";
 import { ocrImages } from "@/lib/ocr/ocr";
+import { isExcelFile, parseProjectorReport, readWorkbook } from "@/lib/projector/excel";
 import { uid } from "@/lib/uid";
 
 interface Group {
@@ -68,7 +69,8 @@ export function MatchStep({ onNext, onBack }: { onNext: () => void; onBack: () =
 
   function apply(g: Group, projectId: string, task: string, remember: boolean, how: string) {
     const ids = new Set(g.entries.map((e) => e.id));
-    const updated = entries.map((e) => (ids.has(e.id) ? resolvedNote({ ...e, projectId, task }, how) : e));
+    const loc = projects.find((p) => p.id === projectId)?.location;
+    const updated = entries.map((e) => (ids.has(e.id) ? resolvedNote({ ...e, projectId, task, location: loc || e.location }, how) : e));
     setEntries(updated);
     if (remember && task) setRules(upsertRules(rules, updated.filter((e) => ids.has(e.id))));
   }
@@ -132,7 +134,7 @@ export function MatchStep({ onNext, onBack }: { onNext: () => void; onBack: () =
 
 function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects }: { g: Group; projects: ProjectMapping[]; byId: Map<string, ProjectMapping>; onApply: (g: Group, projectId: string, task: string, remember: boolean, how: string) => void; onExclude: (g: Group) => void; onAddProjects: (p: ProjectMapping[]) => ProjectMapping[] }) {
   const initialProject = g.projectId ?? g.suggestion?.projectId ?? (g.candidates?.length === 1 ? g.candidates[0] : "");
-  const [mode, setMode] = useState<"match" | "new" | "paste" | "shot">("match");
+  const [mode, setMode] = useState<"match" | "report" | "new" | "paste" | "shot">("match");
   const [projectId, setProjectId] = useState(initialProject);
   const project = projectId ? byId.get(projectId) : undefined;
   const [task, setTask] = useState(project && project.tasks.length === 1 ? project.tasks[0] : project?.defaultTask ?? "");
@@ -153,7 +155,7 @@ function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects }: { g
       setMode("match");
       setProjectId(p.id);
       setTask(p.tasks.length === 1 ? p.tasks[0] : p.defaultTask || "");
-    }
+    } else setMode("match");
   };
 
   return (
@@ -179,6 +181,7 @@ function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects }: { g
           {(
             [
               ["match", "Match existing project"],
+              ["report", "Upload newer Projector report"],
               ["new", "Add new project"],
               ["paste", "Paste Projector details"],
               ["shot", "Upload Projector screenshot"],
@@ -215,7 +218,7 @@ function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects }: { g
         </div>
       )}
       {mode === "new" && <NewProjectForm defaultClient={g.hint} onSave={(p) => afterAdd(onAddProjects([p]), p.code)} />}
-      {(mode === "paste" || mode === "shot") && <QuickProjector mode={mode} onAdd={(ps) => afterAdd(onAddProjects(ps), ps[0].code)} />}
+      {(mode === "paste" || mode === "shot" || mode === "report") && <QuickProjector mode={mode} existing={projects} onAdd={(ps, useCode) => afterAdd(onAddProjects(ps), useCode ?? ps[0].code)} />}
 
       <div className="row gap-sm mt">
         <Button size="sm" variant="ghost" onClick={() => onExclude(g)}>Exclude {g.entries.length === 1 ? "event" : `${g.entries.length} events`} (not project work)</Button>
@@ -244,13 +247,28 @@ function NewProjectForm({ defaultClient, onSave }: { defaultClient: string; onSa
   );
 }
 
-function QuickProjector({ mode, onAdd }: { mode: "paste" | "shot"; onAdd: (p: ProjectMapping[]) => void }) {
+function QuickProjector({ mode, onAdd, existing }: { mode: "paste" | "shot" | "report"; onAdd: (p: ProjectMapping[], useCode?: string) => void; existing: ProjectMapping[] }) {
   const { settings } = useStore();
   const [text, setText] = useState("");
   const [found, setFound] = useState<ParsedProject[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const valid = (found ?? []).filter((p) => p.codeStatus === "valid");
+  async function readReport(files: FileList | null) {
+    const f = files?.[0];
+    if (!f) return;
+    setError(null);
+    if (!isExcelFile(f)) return setError("Choose the .xlsx report downloaded from Projector.");
+    setBusy("Reading report on this device…");
+    try {
+      const r = parseProjectorReport(await readWorkbook(await f.arrayBuffer()));
+      setFound(r.projects);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
   async function scan(files: FileList | null) {
     if (!files?.length) return;
     setError(null);
@@ -271,6 +289,11 @@ function QuickProjector({ mode, onAdd }: { mode: "paste" | "shot"; onAdd: (p: Pr
           <textarea className="paste-area" rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the project row and its tasks from Projector" aria-label="Projector text" />
           <Button size="sm" className="mt" disabled={!text.trim()} onClick={() => setFound(parseProjectorText(text, { keepTaskNumbers: settings.keepTaskNumbers }).projects)}>Detect</Button>
         </>
+      ) : mode === "report" ? (
+        <label className="field">
+          <span>Newer Projector Excel report (.xlsx, read on this device)</span>
+          <input type="file" accept=".xlsx,.xlsm" onChange={(e) => readReport(e.target.files)} />
+        </label>
       ) : (
         <label className="field">
           <span>Projector screenshot (read on this device)</span>
@@ -282,13 +305,28 @@ function QuickProjector({ mode, onAdd }: { mode: "paste" | "shot"; onAdd: (p: Pr
       {found && (
         <div className="mt">
           {found.length === 0 && <p className="small text-warning">No projects detected.</p>}
+          {mode === "report" && found.length > 0 && (() => {
+            const valid = found.filter((p) => p.codeStatus === "valid" && p.tasks.length);
+            const fresh = valid.filter((p) => !existing.some((x) => x.code.toLowerCase() === p.code.toLowerCase()));
+            const newTasks = valid.reduce((a, p) => {
+              const cur = existing.find((x) => x.code.toLowerCase() === p.code.toLowerCase());
+              return a + (cur ? p.tasks.filter((t) => !cur.tasks.some((c) => c.toLowerCase() === t.name.toLowerCase())).length : 0);
+            }, 0);
+            return (
+              <p className="small">
+                {fresh.length} new project{fresh.length === 1 ? "" : "s"}{newTasks ? ` and ${newTasks} new task${newTasks === 1 ? "" : "s"} for saved projects` : ""} in this report.{" "}
+                {(fresh.length > 0 || newTasks > 0) && <button className="link" onClick={() => onAdd(valid.map((p) => ({ id: uid(), client: p.client, code: p.code, tasks: p.tasks.map((t) => t.name), aliases: [], defaultTask: p.tasks.length === 1 ? p.tasks[0].name : "", billable: !p.internal, fullName: p.fullName, source: "excel", roles: p.roles })), "__none__")}>Save new projects and tasks</button>}
+                {" "}Your saved projects are kept. Then pick the project this meeting belongs to.
+              </p>
+            );
+          })()}
           <ul className="resolve-list">
             {found.map((p) => (
               <li key={p.key}>
                 <div><strong>{p.client}</strong> <code>{p.code || "no code"}</code> <span className="small muted">{p.tasks.map((t) => t.name).join(", ") || "no tasks"}</span>
                   {p.codeStatus !== "valid" && <Badge tone="warning">check code</Badge>}
                 </div>
-                <Button size="sm" disabled={p.codeStatus !== "valid" || !p.tasks.length} onClick={() => onAdd([{ id: uid(), client: p.client, code: p.code, tasks: p.tasks.map((t) => t.name), aliases: [], defaultTask: p.tasks.length === 1 ? p.tasks[0].name : "", billable: !p.internal, fullName: p.fullName, source: mode === "paste" ? "paste" : "screenshot" }])}>Save & use</Button>
+                <Button size="sm" disabled={p.codeStatus !== "valid" || !p.tasks.length} onClick={() => onAdd([{ id: uid(), client: p.client, code: p.code, tasks: p.tasks.map((t) => t.name), aliases: [], defaultTask: p.tasks.length === 1 ? p.tasks[0].name : "", billable: !p.internal, fullName: p.fullName, source: mode === "paste" ? "paste" : mode === "report" ? "excel" : "screenshot", roles: p.roles, location: p.locations && p.locations.length > 1 ? p.location : undefined }])}>Save &amp; use</Button>
               </li>
             ))}
           </ul>

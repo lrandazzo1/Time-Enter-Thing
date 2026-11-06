@@ -163,7 +163,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
             <input value={settings.defaultLocation} placeholder="Exactly as in BigTime" onChange={(e) => setSettings({ ...settings, defaultLocation: e.target.value })} />
           </label>
           <Button size="sm" disabled={!settings.defaultLocation.trim()} onClick={() => {
-            setEntries((prev) => prev.map((e) => ({ ...e, location: settings.defaultLocation.trim() })));
+            setEntries((prev) => prev.map((e) => ({ ...e, location: projects.find((p) => p.id === e.projectId)?.location || settings.defaultLocation.trim() })));
             setFlash(`Location set to "${settings.defaultLocation.trim()}" on all entries.`);
           }}>Apply to all</Button>
           <Button size="sm" onClick={() => {
@@ -216,7 +216,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
                   </tr>
                 )}
                 {rows.map((e) => (
-                  <EntryRow key={e.id} e={e} projects={projects} project={e.projectId ? byId.get(e.projectId) : undefined} errors={errorsById.get(e.id) ?? []} overlap={overlapIds.has(e.id)} dup={dupIds.has(e.id)} update={update} remove={remove} approve={approve} split={split} />
+                  <EntryRow key={e.id} e={e} projects={projects} project={e.projectId ? byId.get(e.projectId) : undefined} errors={errorsById.get(e.id) ?? []} overlap={overlapIds.has(e.id)} dup={dupIds.has(e.id)} update={update} remove={remove} approve={approve} split={split} defaultLocation={settings.defaultLocation} />
                 ))}
               </tbody>
             );
@@ -255,7 +255,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
   );
 }
 
-function EntryRow({ e, projects, project, errors, overlap, dup, update, remove, approve, split }: { e: TimeEntry; projects: ProjectMapping[]; project?: ProjectMapping; errors: string[]; overlap: boolean; dup: boolean; update: (id: string, p: Partial<TimeEntry>) => void; remove: (id: string) => void; approve: (ids: string[]) => void; split: (id: string) => void }) {
+function EntryRow({ e, projects, project, errors, overlap, dup, update, remove, approve, split, defaultLocation }: { e: TimeEntry; projects: ProjectMapping[]; project?: ProjectMapping; errors: string[]; overlap: boolean; dup: boolean; update: (id: string, p: Partial<TimeEntry>) => void; remove: (id: string) => void; approve: (ids: string[]) => void; split: (id: string) => void; defaultLocation: string }) {
   const st = entryStatus(e, project);
   const notes = liveNotes(e);
   const candidates = e.candidates?.length ? projects.filter((p) => e.candidates!.includes(p.id)) : [];
@@ -273,7 +273,9 @@ function EntryRow({ e, projects, project, errors, overlap, dup, update, remove, 
         <select className={err("project") ? "has-error" : ""} value={e.projectId ?? ""} aria-label="Project" onChange={(ev) => {
           const p = projects.find((x) => x.id === ev.target.value);
           const task = p ? (p.tasks.includes(e.task) ? e.task : p.tasks.length === 1 ? p.tasks[0] : p.defaultTask && p.tasks.includes(p.defaultTask) ? p.defaultTask : "") : "";
-          update(e.id, { projectId: p?.id ?? null, task, candidates: undefined, suggestion: undefined });
+          const oldLoc = projects.find((x) => x.id === e.projectId)?.location;
+          const location = !e.location.trim() || e.location === defaultLocation || e.location === oldLoc ? p?.location || defaultLocation : e.location;
+          update(e.id, { projectId: p?.id ?? null, task, candidates: undefined, suggestion: undefined, location });
         }}>
           <option value="">{candidates.length ? "Choose (ambiguous)…" : "Choose project…"}</option>
           {candidates.length > 0 && (

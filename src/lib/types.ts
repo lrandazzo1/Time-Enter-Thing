@@ -10,7 +10,11 @@ export interface ProjectMapping {
   /** Full Projector project name, e.g. "Acme Components - Adaptive Planning - Implementation". */
   fullName?: string;
   /** How the project entered the app. */
-  source?: "screenshot" | "paste" | "file" | "manual";
+  source?: "screenshot" | "paste" | "file" | "manual" | "excel";
+  /** BigTime location for this project's time (overrides the default location). */
+  location?: string;
+  /** Projector roles seen in imported reports (reference only; never exported). */
+  roles?: string[];
 }
 
 /** A confirmed calendar-title → project/task assignment, reused in later weeks. */

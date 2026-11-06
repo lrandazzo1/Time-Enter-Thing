@@ -45,6 +45,7 @@ await page.getByRole("heading", { name: "Welcome to Timesheet Converter" }).wait
 check("first visit shows onboarding wizard", true);
 await shot("01-onboarding");
 
+await page.getByRole("tab", { name: /Scan screenshots/ }).click();
 await page.locator('input[type=file][accept*="image/png"]').setInputFiles(["projector-list-1.png", "projector-list-2.png", "projector-list-3.png"].map((f) => path.join(FIX, "projector", f)));
 await page.getByRole("button", { name: /Detect projects in 3 screenshots/ }).click();
 const ocrStart = Date.now();

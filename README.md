@@ -1,13 +1,25 @@
-# Timesheet Converter 2.0
+# Timesheet Converter 2.1
 
 Turn your Outlook calendar into a reviewed, import-ready **BigTime Enterprise PSA** (formerly Projector PSA) timesheet CSV — free, private, and without any AI service.
 
-- **Import your projects from Projector** by scanning screenshots (local OCR), pasting copied text, or importing a backup/CSV.
+- **Import your projects from Projector** by uploading the original **Projector Excel report** (recommended), scanning screenshots (local OCR), pasting copied text, or importing a backup/CSV.
 - **Import your Outlook calendar** (.ics or .csv export, pasted events, manual entry, or — beta — calendar screenshots).
 - **Match, review and approve** the hours you actually worked; the app remembers your choices for next week.
 - **Download** `BigTime_Timesheet_YYYY-MM-DD_to_YYYY-MM-DD.csv` with the exact six-column format that imports into BigTime.
 
-Everything runs in the browser. There is no server-side code, no database, no account, no API key and no environment variable. Screenshots and calendar files never leave the device: text recognition uses open-source [Tesseract.js](https://github.com/naptha/tesseract.js) served from this site's own `/tesseract/` folder, and the site's Content-Security-Policy (`connect-src 'self'`) blocks the page from sending data to any other server.
+Everything runs in the browser.
+
+## Which Projector report employees should export
+
+A **Time Card Report** from Projector, exported to **Excel** and uploaded unchanged:
+
+1. Projector → **Reports** → **Time Card Report** (save it, e.g. as “Timesheet Converter”, to reuse it).
+2. Columns: **Project**, **Task Name**, **Work Location** (and optionally **Role**). Other columns are ignored.
+3. Filter to **yourself** (resource filter / resource search string).
+4. Date range: long enough to include every project you work on — the last **3–6 months** is a good default.
+5. Export → Excel, then in Timesheet Converter: **Projects → Import projects → Upload Projector Excel report** (or the first step of the setup wizard).
+
+The importer uses the `Report` sheet (or any sheet with *Project* and *Task Name* columns), takes the project code from the final parentheses in the Project column (`Globex - Adaptive Planning - MSP (P005678-001)` → `P005678-001`), keeps task names exactly, suggests the location from *Work Location*, keeps *Role* only as reference, and shows the date range and filters from the `Options` sheet. A time card report is history, not an assignment list: projects you haven't charged time to in the date range won't be in it — upload a newer report later (also possible from the Match step) and new projects/tasks are merged into what's saved. `.xlsx` and `.xlsm` are read as data only; macros are never run. Menu names can vary slightly between Projector versions. There is no server-side code, no database, no account, no API key and no environment variable. Screenshots and calendar files never leave the device: text recognition uses open-source [Tesseract.js](https://github.com/naptha/tesseract.js) served from this site's own `/tesseract/` folder, and the site's Content-Security-Policy (`connect-src 'self'`) blocks the page from sending data to any other server.
 
 ---
 
@@ -18,7 +30,7 @@ The ZIP contains the complete Next.js app with `package.json` at its root. Verce
 1. **Unzip** `timesheet-converter-v2.zip`. You get a folder (e.g. `timesheet-converter-v2`) containing `package.json`, `src/`, `public/` …
 2. Open Vercel's **Drop** page (in the Vercel dashboard: **Add New → Project**, then the drag-and-drop / Drop option).
 3. **Drag the unzipped folder** onto the drop area. Vercel detects **Next.js**, runs `npm install` and `npm run build`, and gives you a URL. No settings or environment variables are needed.
-4. Open the URL and check: the page shows *Welcome to Timesheet Converter*, and **Projects → Import projects → Scan screenshots** reads a screenshot (the first scan downloads ~11 MB of OCR engine from your own site).
+4. Open the URL and check: the page shows *Welcome to Timesheet Converter* with **Upload Projector Excel report** selected; uploading a Projector report lists your projects. (Screenshot scanning downloads ~11 MB of OCR engine from your own site the first time it's used.)
 
 ### Replacing your current deployment (`timesheet-converter-five.vercel.app`)
 
@@ -47,6 +59,9 @@ npm test           # unit + real OCR integration tests (Vitest)
 npm run build      # production build (copies OCR assets first)
 npm start          # serve the build
 npm run e2e        # end-to-end browser tests against http://localhost:3000 (needs Playwright)
+node e2e/excel.mjs http://localhost:3000   # Excel-report onboarding end-to-end test
+PROJECTOR_REPORT=/path/to/real.xlsx npx vitest run tests/excel.private.test.ts   # optional check with a real report (never commit it)
+python3 scripts/make-excel-fixtures.py      # regenerate the synthetic Excel fixtures (needs openpyxl)
 npm run make-fixtures   # regenerate the synthetic screenshot fixtures (needs Playwright)
 ```
 
@@ -60,7 +75,7 @@ src/components/          UI: App shell, Onboarding wizard, ProjectImporter (scan
                          ProjectsPage, GenerateTimesheet (Import → Match → Review → Download), MatchStep,
                          ReviewStep, ExportStep, SetupGuide (Help)
 src/lib/ocr/             Tesseract.js wrapper (Web Worker), image preprocessing, engine-independent OCR types
-src/lib/projector/       Projector parser: project codes, client extraction, task hierarchy, merging, review helpers
+src/lib/projector/       Projector Excel report import (excel.ts), text/OCR parser: codes, clients, tasks, hierarchy, merging
 src/lib/parsers/         Outlook .ics (ical.js + Intl time zones), Outlook/generic .csv, pasted events, calendar-screenshot OCR
 src/lib/matching.ts      Calendar → project/task matching (rules, code, convention, names, domains, fuzzy suggestions)
 src/lib/fuzzy.ts         Fuzzy/acronym/domain helpers (suggestions only)

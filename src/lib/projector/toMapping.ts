@@ -34,5 +34,7 @@ export function toMapping(p: ReviewProject, source: ProjectMapping["source"]): P
     billable: !p.internal,
     fullName: p.fullName.trim() || undefined,
     source,
+    location: p.location?.trim() || undefined,
+    roles: p.roles?.length ? [...p.roles] : undefined,
   };
 }

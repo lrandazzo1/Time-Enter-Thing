@@ -4,7 +4,7 @@ import { stripTaskPrefix } from "./matching";
 import { toCsv } from "./exporters/csv";
 import { uid } from "./uid";
 
-export const PROJECT_CSV_COLUMNS = ["Client", "Aliases", "Project Code", "Tasks", "Default Task", "Type", "Full Project Name"];
+export const PROJECT_CSV_COLUMNS = ["Client", "Aliases", "Project Code", "Tasks", "Default Task", "Type", "Full Project Name", "Location"];
 
 const splitList = (s: string) =>
   s
@@ -77,7 +77,8 @@ export function parseProjectsCsv(text: string, opts: { stripNumericPrefixes: boo
     }
     if (!defaultTask && tasks.length === 1) defaultTask = tasks[0];
     const fullName = pick(r, "fullprojectname", "projectname", "fullname");
-    projects.push({ id: uid(), client: client || code, aliases: splitList(pick(r, "aliases", "alias", "alternatenames", "othernames")), code, tasks, defaultTask, billable, fullName: fullName || undefined, source: "file" });
+    const location = pick(r, "location", "worklocation");
+    projects.push({ id: uid(), client: client || code, aliases: splitList(pick(r, "aliases", "alias", "alternatenames", "othernames")), code, tasks, defaultTask, billable, fullName: fullName || undefined, source: "file", location: location || undefined });
   });
   if (projects.length === 0) throw new Error("No projects found in this CSV.");
   return { projects, warnings };
@@ -86,7 +87,7 @@ export function parseProjectsCsv(text: string, opts: { stripNumericPrefixes: boo
 export function projectsToCsv(projects: ProjectMapping[]): string {
   return toCsv([
     PROJECT_CSV_COLUMNS,
-    ...projects.map((p) => [p.client, p.aliases.join("; "), p.code, p.tasks.join("; "), p.defaultTask, p.billable ? "Billable" : "Internal", p.fullName ?? ""]),
+    ...projects.map((p) => [p.client, p.aliases.join("; "), p.code, p.tasks.join("; "), p.defaultTask, p.billable ? "Billable" : "Internal", p.fullName ?? "", p.location ?? ""]),
   ]);
 }
 
@@ -117,6 +118,8 @@ export function mergeProjects(existing: ProjectMapping[], incoming: ProjectMappi
     }
     for (const a of inc.aliases) if (!cur.aliases.some((x) => x.toLowerCase() === a.toLowerCase()) && a.toLowerCase() !== cur.client.toLowerCase()) cur.aliases.push(a);
     if (!cur.fullName && inc.fullName) cur.fullName = inc.fullName;
+    if (!cur.location && inc.location) cur.location = inc.location;
+    if (inc.roles?.length) cur.roles = [...new Set([...(cur.roles ?? []), ...inc.roles])];
     if (!cur.defaultTask && cur.tasks.length === 1) cur.defaultTask = cur.tasks[0];
     if (cur.tasks.length + cur.aliases.length !== before) updated++;
   }

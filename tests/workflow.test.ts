@@ -66,6 +66,24 @@ describe("matching priority", () => {
     expect(matchEvent("Okay Firm | Acme: Rules Working Session", "", ps).projectId).toBe("acme");
     expect(matchEvent("INTERNAL: Acme sync", "", ps).candidates?.sort()).toEqual(["acme", "internal", "own"]);
   });
+  it("your own organisation's name alone never assigns time (projects imported without aliases)", () => {
+    const ps: ProjectMapping[] = [
+      { id: "own", client: "Northwind", aliases: [], code: "P000998-001", tasks: ["Internal - Meeting"], defaultTask: "Internal - Meeting", billable: false },
+      { id: "fac", client: "The Forge Associates Group", aliases: [], code: "P000997-001", tasks: ["Planning"], defaultTask: "Planning", billable: true },
+      { id: "kite", client: "Kite Mills", aliases: [], code: "P000996-001", tasks: ["Planning", "Gears"], defaultTask: "", billable: true },
+    ];
+    const a = eventToEntry(ev("KM & Northwind / Gears Requirement Session"), ps, settings);
+    expect(a.projectId).toBeNull();
+    expect(a.candidates).toEqual(["own"]);
+    const b = eventToEntry(ev("TFAG | Northwind Model Build Working Session"), ps, settings);
+    expect(b.projectId).toBeNull();
+    expect(b.suggestion?.projectId).toBe("fac");
+    const c = eventToEntry(ev("INTERNAL: Kite Mills sync"), ps, settings);
+    expect(c.projectId).toBeNull();
+    expect(c.candidates).toEqual(["kite", "own"]);
+    expect(eventToEntry(ev("Northwind | Kite Mills: Rules Working Session"), ps, settings)).toMatchObject({ projectId: "kite" });
+    expect(eventToEntry(ev("Northwind | Internal - Meeting | Team sync"), ps, settings)).toMatchObject({ projectId: "own", task: "Internal - Meeting", description: "Team sync" });
+  });
   it("4. organizer domain gives a proposed match that needs confirmation", () => {
     const e = eventToEntry(ev("Budget model capital planning", { domains: ["globex.com"] }), projects, settings);
     expect(e.projectId).toBe("globex");
