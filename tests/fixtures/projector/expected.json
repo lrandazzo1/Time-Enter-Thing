@@ -1,0 +1,123 @@
+{
+  "projector-list-1.png": {
+    "header": true,
+    "rows": [
+      {
+        "name": "Acme Components - Adaptive Planning - Implementation",
+        "code": "P001234-001",
+        "tasks": [
+          "2 Planning",
+          "3 Gears",
+          "4 Bearings",
+          "5 Precision Parts"
+        ]
+      },
+      {
+        "name": "Globex Corporation - Adaptive Planning - MSP",
+        "code": "P005678-001",
+        "tasks": [
+          [
+            "3 Planning Consultant",
+            "LATE"
+          ]
+        ]
+      },
+      {
+        "name": "Smith-Jones Holdings - Adaptive Planning - Implementation",
+        "code": "P002468-002",
+        "tasks": [
+          "2 Consultant"
+        ]
+      },
+      {
+        "name": "Our Firm - Internal",
+        "code": "P000999-001",
+        "tasks": [
+          "5 Internal - Meeting"
+        ]
+      }
+    ]
+  },
+  "projector-list-1-dark.png": {
+    "header": true,
+    "rows": [
+      {
+        "name": "Acme Components - Adaptive Planning - Implementation",
+        "code": "P001234-001",
+        "tasks": [
+          "2 Planning",
+          "3 Gears",
+          "4 Bearings",
+          "5 Precision Parts"
+        ]
+      },
+      {
+        "name": "Globex Corporation - Adaptive Planning - MSP",
+        "code": "P005678-001",
+        "tasks": [
+          [
+            "3 Planning Consultant",
+            "LATE"
+          ]
+        ]
+      },
+      {
+        "name": "Smith-Jones Holdings - Adaptive Planning - Implementation",
+        "code": "P002468-002",
+        "tasks": [
+          "2 Consultant"
+        ]
+      },
+      {
+        "name": "Our Firm - Internal",
+        "code": "P000999-001",
+        "tasks": [
+          "5 Internal - Meeting"
+        ]
+      }
+    ]
+  },
+  "projector-list-2.png": {
+    "header": false,
+    "leading": [
+      "11 Internal - Training"
+    ],
+    "rows": [
+      {
+        "name": "The Metro Public Library (MPL) - Adaptive Planning - Implementation",
+        "code": "P007979-001",
+        "tasks": [
+          "2 Planning"
+        ]
+      },
+      {
+        "name": "Initech - Workday Adaptive Planning - Support",
+        "code": "P003141-001",
+        "tasks": [
+          "2 Support",
+          "3 Integration"
+        ]
+      }
+    ]
+  },
+  "projector-list-3.png": {
+    "header": false,
+    "rows": [
+      {
+        "name": "Initech - Workday Adaptive Planning - Support",
+        "code": "P003141-001",
+        "tasks": [
+          "3 Integration",
+          "4 Training"
+        ]
+      },
+      {
+        "name": "Umbrella Health - Adaptive Planning - Implementation",
+        "code": "P008080-003",
+        "tasks": [
+          "3 Planning"
+        ]
+      }
+    ]
+  }
+}

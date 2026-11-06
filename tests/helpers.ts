@@ -12,6 +12,9 @@ export const settings: Settings = {
   locationRequired: true,
   exclusionKeywords: ["lunch", "PTO"],
   csvDateOrder: "MDY",
+  keepTaskNumbers: false,
+  onboarding: "done",
+  onboardingStep: 5,
 };
 
 export const period = { start: "2026-11-02", end: "2026-11-08" };

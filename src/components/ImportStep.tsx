@@ -7,11 +7,12 @@ import { parseIcs } from "@/lib/parsers/ics";
 import { parseCalendarCsv } from "@/lib/parsers/csv";
 import { eventToEntry, fingerprintOf } from "@/lib/matching";
 import { addDays, formatDecimalHours, intervalMinutes, isValidHHMM, mondayOf, parseHoursInput, prettyDate, todayIn } from "@/lib/time";
-import { extractEventsFromScreenshot, fetchAiStatus, type AiStatus } from "@/lib/aiClient";
-import { loadAccessCode, saveAccessCode } from "@/lib/storage";
+import { ocrImages, type OcrProgress } from "@/lib/ocr/ocr";
+import { calendarEventsFromOcr } from "@/lib/parsers/calendarOcr";
+import { parsePastedEvents } from "@/lib/parsers/paste";
 import { uid } from "@/lib/uid";
 
-type Mode = "file" | "screenshot" | "manual";
+type Mode = "file" | "paste" | "manual" | "screenshot";
 
 interface ImportSummary {
   added: number;
@@ -23,7 +24,7 @@ interface ImportSummary {
 }
 
 export function ImportStep({ onDone }: { onDone: () => void }) {
-  const { period, setPeriod, settings, projects, entries, setEntries } = useStore();
+  const { period, setPeriod, settings, projects, entries, setEntries, rules } = useStore();
   const [mode, setMode] = useState<Mode>("file");
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,7 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
     const known = new Set(base.filter((e) => e.included && e.fingerprint).map((e) => e.fingerprint!));
     let duplicates = 0;
     const fresh: TimeEntry[] = events.map((ev) => {
-      const entry = eventToEntry(ev, projects, settings);
+      const entry = eventToEntry(ev, projects, settings, rules);
       if (entry.fingerprint && entry.included && known.has(entry.fingerprint)) {
         duplicates++;
         return { ...entry, included: false, excludeReason: "Duplicate of an event already imported", notes: [...entry.notes, { code: "duplicate", level: "info", message: "Same title and time as an entry already in this timesheet — excluded." }] };
@@ -109,22 +110,24 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
       </Card>
 
       {projects.length === 0 && (
-        <Notice tone="warning" title="Add your BigTime projects first">
-          Matching needs your client names, project codes and tasks. Open the <strong>Projects &amp; Tasks</strong> tab to add them or import a CSV. You can still import now and assign projects during review.
+        <Notice tone="info" title="No projects saved yet">
+          You can import your calendar now and add projects as you match each meeting, or import your Projector projects first on the <strong>Projects</strong> page.
         </Notice>
       )}
 
-      <div className="segmented" role="tablist" aria-label="Import method">
+      <div className="method-grid four" role="tablist" aria-label="Import method">
         {(
           [
-            ["file", "Calendar file", ".ics or .csv — no AI needed"],
-            ["screenshot", "Screenshots", "AI recognition"],
-            ["manual", "Add manually", "Type entries"],
+            ["file", "📅", "Upload Outlook .ics / .csv", "Recommended · exact times"],
+            ["paste", "📋", "Paste event information", "Copied from Outlook or a list"],
+            ["manual", "✍️", "Enter work manually", "Time that isn't on your calendar"],
+            ["screenshot", "🖼️", "Calendar screenshot", "Beta · times must be verified"],
           ] as const
-        ).map(([id, label, sub]) => (
-          <button key={id} role="tab" aria-selected={mode === id} className={`segment ${mode === id ? "is-active" : ""}`} onClick={() => setMode(id)}>
-            <span className="segment-label">{label}</span>
-            <span className="segment-sub">{sub}</span>
+        ).map(([id, icon, label, sub]) => (
+          <button key={id} role="tab" aria-selected={mode === id} className={`method ${mode === id ? "is-active" : ""}`} onClick={() => setMode(id)}>
+            <span className="method-icon" aria-hidden>{icon}</span>
+            <span className="method-title">{label}</span>
+            <span className="method-sub">{sub}</span>
           </button>
         ))}
       </div>
@@ -137,7 +140,7 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
       )}
 
       {mode === "file" && (
-        <Card title="Import an Outlook calendar file" subtitle="Your file is read in this browser only — it is not uploaded anywhere.">
+        <Card title="Import your Outlook calendar" subtitle="Your file is read in this browser only — it is not uploaded anywhere.">
           <Dropzone accept=".ics,.ical,.csv,text/calendar,text/csv" multiple onFiles={onCalendarFiles} label={<><strong>Drop .ics or .csv files here</strong> or click to choose</>} hint="Outlook: File → Save Calendar (.ics) or File → Open & Export → Import/Export → Export to a file → CSV. See the Setup Guide for Outlook on the web and Mac." icon="📅" />
           <details className="help">
             <summary>Tip: name your work blocks so they match automatically</summary>
@@ -149,6 +152,7 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
       )}
 
       {mode === "screenshot" && <ScreenshotImport onEvents={addEvents} onError={setError} />}
+      {mode === "paste" && <PasteEvents onEvents={addEvents} onError={setError} />}
       {mode === "manual" && <ManualEntry />}
 
       {error && <Notice tone="error" title="Import problem">{error}</Notice>}
@@ -165,7 +169,7 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
             </ul>
           )}
           <div className="row gap-sm mt">
-            <Button variant="primary" onClick={onDone}>Review entries →</Button>
+            <Button variant="primary" onClick={onDone}>Match work →</Button>
           </div>
         </Notice>
       )}
@@ -173,81 +177,73 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
   );
 }
 
+function PasteEvents({ onEvents, onError }: { onEvents: (ev: CalendarEvent[], w: string[], label: string) => void; onError: (e: string | null) => void }) {
+  const { period, settings } = useStore();
+  const [text, setText] = useState("");
+  return (
+    <Card title="Paste event information" subtitle="Paste rows copied from Outlook's list view (with a header row), or lines like “11/03/2026 9:00 AM - 10:30 AM Acme | Planning | Model build”. Day headings such as “Tuesday, November 3” apply to the lines below them.">
+      <textarea className="paste-area" rows={9} value={text} onChange={(e) => setText(e.target.value)} aria-label="Pasted events" spellCheck={false} placeholder={"Monday, November 2, 2026\n9:00 AM - 12:30 PM Acme Corp | Planning | Model build\n1:00 PM - 2:15 PM Globex sync"} />
+      <div className="row gap-sm mt">
+        <Button variant="primary" disabled={!text.trim()} onClick={() => {
+          onError(null);
+          try {
+            const r = parsePastedEvents(text, period, settings);
+            if (!r.events.length) {
+              onError("No events with a recognisable title were found. Include a time range (e.g. 9:00 AM - 10:00 AM) and a date or day heading.");
+              return;
+            }
+            onEvents(r.events, r.warnings, "pasted text");
+            setText("");
+          } catch (e) {
+            onError((e as Error).message);
+          }
+        }}>Detect events</Button>
+      </div>
+      <p className="muted small mt">Lines without a visible time range are added with no hours — you enter them. Nothing is guessed.</p>
+    </Card>
+  );
+}
+
 function ScreenshotImport({ onEvents, onError }: { onEvents: (ev: CalendarEvent[], w: string[], label: string) => void; onError: (e: string | null) => void }) {
-  const { period, settings, projects } = useStore();
-  const [status, setStatus] = useState<AiStatus | null>(null);
+  const { period, settings } = useStore();
   const [files, setFiles] = useState<File[]>([]);
-  const [consent, setConsent] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [code, setCode] = useState("");
+  const [progress, setProgress] = useState<OcrProgress | null>(null);
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
   useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
-  useEffect(() => {
-    fetchAiStatus().then(setStatus);
-    setCode(loadAccessCode());
-  }, []);
-
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const imgs = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
-      if (imgs.length) setFiles((prev) => [...prev, ...imgs.map((f, i) => new File([f], f.name && f.name !== "image.png" ? f.name : `pasted-${Date.now()}-${i}.png`, { type: f.type }))].slice(0, 10));
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, []);
-
-  if (!status) return <Card title="Calendar screenshots"><p className="muted">Checking whether screenshot recognition is available…</p></Card>;
-
-  if (!status.ai) {
-    return (
-      <Card title="Calendar screenshots" subtitle="Needs an AI backend">
-        <Notice tone="warning" title="Screenshot recognition is not set up on this site">
-          Reading screenshots requires a vision AI service configured on the server. The site owner needs to set <code>ANTHROPIC_API_KEY</code> in the hosting environment (see the README) and redeploy. Until then, use <strong>Calendar file</strong> import or <strong>Add manually</strong> — both work fully without AI.
-        </Notice>
-      </Card>
-    );
-  }
 
   async function run() {
     onError(null);
-    if (status?.accessCodeRequired) saveAccessCode(code.trim());
-    const events: CalendarEvent[] = [];
-    const warnings: string[] = [];
     try {
-      for (const [i, f] of files.entries()) {
-        setBusy(`Reading screenshot ${i + 1} of ${files.length}…`);
-        const label = f.name || `Screenshot ${i + 1}`;
-        const r = await extractEventsFromScreenshot(f, { referenceDate: period.start, timeZone: settings.timeZone, projects, label });
-        events.push(...r.events);
-        warnings.push(...r.warnings.map((w) => `${label}: ${w}`));
-      }
-      // Within this batch, identical events seen in several screenshots are kept once.
+      const pages = await ocrImages(files, { mode: "calendar", onProgress: setProgress });
+      const r = calendarEventsFromOcr(pages, period, settings);
       const seen = new Set<string>();
-      const unique = events.filter((e) => {
+      const unique = r.events.filter((e) => {
         const k = fingerprintOf(e.date, e.start, e.end, e.title);
         if (seen.has(k)) return false;
         seen.add(k);
         return true;
       });
-      if (unique.length < events.length) warnings.push(`${events.length - unique.length} event(s) appeared in more than one screenshot and were kept once.`);
-      const outside = unique.filter((e) => e.date && (e.date < period.start || e.date > period.end));
-      if (outside.length) warnings.push(`${outside.length} event(s) fall outside the timesheet period — they are flagged in review.`);
-      if (unique.length === 0) {
-        onError("No events could be read from these screenshots. Make sure event titles and the time grid are visible.");
+      if (!unique.length) {
+        onError("No events could be read. Calendar screenshots are hard to read reliably — an .ics/.csv export or pasted text works much better.");
         return;
       }
-      onEvents(unique, warnings, `${files.length} screenshot${files.length > 1 ? "s" : ""}`);
+      onEvents(unique, r.warnings, `${files.length} screenshot${files.length > 1 ? "s" : ""}`);
       setFiles([]);
     } catch (e) {
-      onError((e as Error).message);
+      onError(`Text recognition failed: ${(e as Error).message}`);
     } finally {
-      setBusy(null);
+      setProgress(null);
     }
   }
 
   return (
-    <Card title="Calendar screenshots" subtitle="Upload or paste (Ctrl/⌘+V) one or more screenshots of your Outlook calendar. Overlapping screenshots are fine — duplicates are detected.">
-      <Dropzone accept="image/png,image/jpeg,image/webp,image/gif" multiple onFiles={(f) => setFiles((prev) => [...prev, ...f.filter((x) => x.type.startsWith("image/"))].slice(0, 10))} label={<><strong>Drop screenshots here</strong>, click to choose, or paste</>} hint="Work-week view with the time grid visible works best. Up to 10 images." icon="🖼️" />
+    <Card title="Calendar screenshot (beta)" subtitle="Read locally on this device. Use this only when you can't export or copy your calendar.">
+      <Notice tone="warning" title="Screenshots give approximate results">
+        Only text that is visible is used. Event blocks rarely show their exact times, so most events arrive <strong>without hours</strong> and every date and time must be checked. Calendar files are far more accurate.
+      </Notice>
+      <div className="mt">
+        <Dropzone accept="image/png,image/jpeg,image/webp" multiple onFiles={(f) => setFiles((prev) => [...prev, ...f.filter((x) => x.type.startsWith("image/"))].slice(0, 10))} label={<><strong>Drop calendar screenshots</strong> or click to choose</>} hint="Work-week view with day headers visible works best." icon="🖼️" />
+      </div>
       {files.length > 0 && (
         <ul className="thumbs">
           {files.map((f, i) => (
@@ -255,34 +251,19 @@ function ScreenshotImport({ onEvents, onError }: { onEvents: (ev: CalendarEvent[
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={previews[i]} alt={`Screenshot ${i + 1}`} />
               <span className="thumb-name">{f.name}</span>
-              <button className="thumb-remove" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}>
-                ×
-              </button>
+              <button className="thumb-remove" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</button>
             </li>
           ))}
         </ul>
       )}
-      <div className="privacy">
-        <label className="check">
-          <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-          <span>
-            I&apos;m allowed to share these screenshots with the AI service. They are sent from this site&apos;s server to Anthropic ({status.model}) for this one request, together with my client names and project codes for matching. This site does not store them.
-          </span>
-        </label>
-        {status.accessCodeRequired && (
-          <label className="field mt">
-            <span>Access code (from whoever runs this site)</span>
-            <input type="password" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" />
-          </label>
-        )}
-      </div>
-      <div className="row gap-sm mt">
-        <Button variant="primary" disabled={!files.length || !consent || Boolean(busy) || (status.accessCodeRequired && !code.trim())} onClick={run}>
-          {busy ?? `Extract events from ${files.length || ""} screenshot${files.length === 1 ? "" : "s"}`}
-        </Button>
-        {files.length > 0 && !busy && <Button variant="ghost" onClick={() => setFiles([])}>Clear</Button>}
-      </div>
-      <p className="muted small mt">Extracted events always land in review flagged &ldquo;from screenshot&rdquo; — check the times against your calendar.</p>
+      {progress ? (
+        <div className="progress-box" role="status" aria-live="polite">
+          <div className="small">Screenshot {progress.index + 1} of {progress.total}: {progress.status}</div>
+          <div className="progress"><span style={{ width: `${((progress.index + progress.progress) / progress.total) * 100}%` }} /></div>
+        </div>
+      ) : (
+        <Button variant="primary" className="mt" disabled={!files.length} onClick={run}>Read {files.length || ""} screenshot{files.length === 1 ? "" : "s"}</Button>
+      )}
     </Card>
   );
 }

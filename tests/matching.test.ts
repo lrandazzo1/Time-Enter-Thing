@@ -14,7 +14,7 @@ describe("matching", () => {
     expect(matchEvent("acme | 2 Planning | x", "", projects)).toMatchObject({ projectId: "acme", task: "Planning" });
   });
   it("flags unknown tasks instead of guessing", () => {
-    const m = matchEvent("Acme Corp | Springs | x", "", projects);
+    const m = matchEvent("Acme Corp | Gears | x", "", projects);
     expect(m.projectId).toBe("acme");
     expect(m.task).toBe("");
     expect(m.notes[0].code).toBe("convention-task-unmatched");
@@ -40,12 +40,6 @@ describe("matching", () => {
     expect(t.included).toBe(true);
     expect(t.notes.some((n) => n.code === "tentative")).toBe(true);
     expect(t.location).toBe("Main Office");
-  });
-  it("validates AI suggestions against the configured list", () => {
-    const e = eventToEntry(ev("Quarterly review", { source: "screenshot", ai: { projectCode: "P000200-001", task: "Consultant", confidence: "high", notes: "" } }), projects, settings);
-    expect(e).toMatchObject({ projectId: "globex", task: "Consultant" });
-    const bad = eventToEntry(ev("Quarterly review", { source: "screenshot", ai: { projectCode: "P123", task: "X", confidence: "high", notes: "" } }), projects, settings);
-    expect(bad.projectId).toBeNull();
   });
   it("strips numeric prefixes", () => {
     expect(stripTaskPrefix("3 Planning Consultant")).toBe("Planning Consultant");

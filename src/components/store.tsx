@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { Period, ProjectMapping, Settings, TimeEntry } from "@/lib/types";
-import { clearDraft, defaultPeriod, defaultSettings, loadDraft, loadProjects, loadSettings, saveDraft, saveProjects, saveSettings } from "@/lib/storage";
+import type { MatchRule, Period, ProjectMapping, Settings, TimeEntry } from "@/lib/types";
+import { clearDraft, defaultPeriod, defaultSettings, loadDraft, loadProjects, loadRules, loadSettings, saveDraft, saveProjects, saveRules, saveSettings } from "@/lib/storage";
 
 interface Store {
   ready: boolean;
@@ -10,6 +10,8 @@ interface Store {
   setProjects: (p: ProjectMapping[] | ((prev: ProjectMapping[]) => ProjectMapping[])) => void;
   settings: Settings;
   setSettings: (s: Settings | ((prev: Settings) => Settings)) => void;
+  rules: MatchRule[];
+  setRules: (r: MatchRule[] | ((prev: MatchRule[]) => MatchRule[])) => void;
   entries: TimeEntry[];
   setEntries: (e: TimeEntry[] | ((prev: TimeEntry[]) => TimeEntry[])) => void;
   period: Period;
@@ -25,12 +27,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<ProjectMapping[]>([]);
   const [settings, setSettings] = useState<Settings>(() => defaultSettings());
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [rules, setRules] = useState<MatchRule[]>([]);
   const [period, setPeriod] = useState<Period>(() => defaultPeriod(defaultSettings().timeZone));
 
   useEffect(() => {
     const s = loadSettings();
     setSettings(s);
     setProjects(loadProjects());
+    setRules(loadRules());
     const d = loadDraft();
     if (d) {
       setEntries(d.entries ?? []);
@@ -54,6 +58,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (ready) saveSettings(settings);
   }, [ready, settings]);
   useEffect(() => {
+    if (ready) saveRules(rules);
+  }, [ready, rules]);
+  useEffect(() => {
     if (ready) saveDraft({ entries, period, savedAt: new Date().toISOString() });
   }, [ready, entries, period]);
 
@@ -64,8 +71,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [settings.timeZone]);
 
   const value = useMemo<Store>(
-    () => ({ ready, storageOk, projects, setProjects, settings, setSettings, entries, setEntries, period, setPeriod, resetDraft }),
-    [ready, storageOk, projects, settings, entries, period, resetDraft],
+    () => ({ ready, storageOk, projects, setProjects, settings, setSettings, rules, setRules, entries, setEntries, period, setPeriod, resetDraft }),
+    [ready, storageOk, projects, settings, rules, entries, period, resetDraft],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

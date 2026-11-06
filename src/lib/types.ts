@@ -7,6 +7,22 @@ export interface ProjectMapping {
   tasks: string[];
   defaultTask: string;
   billable: boolean;
+  /** Full Projector project name, e.g. "Acme Components - Adaptive Planning - Implementation". */
+  fullName?: string;
+  /** How the project entered the app. */
+  source?: "screenshot" | "paste" | "file" | "manual";
+}
+
+/** A confirmed calendar-title → project/task assignment, reused in later weeks. */
+export interface MatchRule {
+  id: string;
+  /** Normalized calendar title. */
+  key: string;
+  /** Original title, for display. */
+  example: string;
+  projectId: string;
+  task: string;
+  createdAt: string;
 }
 
 export interface Settings {
@@ -19,10 +35,16 @@ export interface Settings {
   exclusionKeywords: string[];
   /** Day order used by Outlook CSV exports when a date is ambiguous. */
   csvDateOrder: "MDY" | "DMY" | "YMD";
+  /** Keep Projector's numeric task prefixes ("2 Planning") in task names. Off by default: BigTime's importer rejects them. */
+  keepTaskNumbers: boolean;
+  /** First-time setup wizard state. */
+  onboarding: "active" | "done" | "skipped";
+  /** Which onboarding step the user reached (1-5). */
+  onboardingStep: number;
 }
 
 export type BusyStatus = "busy" | "tentative" | "free" | "oof" | "elsewhere" | "unknown";
-export type EntrySource = "ics" | "csv" | "screenshot" | "manual";
+export type EntrySource = "ics" | "csv" | "screenshot" | "paste" | "manual";
 
 export interface Interval {
   /** "HH:MM" 24-hour, in Settings.timeZone */
@@ -42,14 +64,17 @@ export interface ImportNote {
     | "task-unclear"
     | "convention-task-unmatched"
     | "default-task"
-    | "ai-suggested"
-    | "ai-disagrees"
-    | "ai-low-confidence"
     | "missing-times"
     | "duplicate"
     | "crosses-midnight"
     | "outside-period"
     | "recurring"
+    | "remembered"
+    | "domain-match"
+    | "fuzzy-suggestion"
+    | "unknown-client"
+    | "screenshot-time"
+    | "screenshot-date"
     | "info";
   level: "info" | "warning";
   message: string;
@@ -83,6 +108,12 @@ export interface TimeEntry {
   duplicateAck?: boolean;
   /** Fingerprint used for duplicate detection: date|start|end|normalized title */
   fingerprint?: string;
+  /** User approved this line as time actually worked. */
+  confirmed?: boolean;
+  /** A suggested (not applied) project from fuzzy/domain matching. */
+  suggestion?: { projectId: string; reason: string };
+  /** Email domains of the organizer/attendees (calendar files only), used for matching hints. */
+  domains?: string[];
 }
 
 /** Raw calendar event produced by a parser, before matching. */
@@ -99,15 +130,13 @@ export interface CalendarEvent {
   status: BusyStatus;
   recurring: boolean;
   crossesMidnight?: boolean;
+  /** Organizer/attendee email domains (lowercase). */
+  domains?: string[];
+  /** Extra review notes produced by the parser (e.g. screenshot inference). */
+  parseNotes?: { code: "screenshot-time" | "screenshot-date" | "info"; message: string }[];
   source: EntrySource;
   sourceLabel?: string;
-  /** Screenshot-only AI hints (validated before use). */
-  ai?: {
-    projectCode: string;
-    task: string;
-    confidence: "high" | "medium" | "low";
-    notes: string;
-  };
+
 }
 
 export interface Period {

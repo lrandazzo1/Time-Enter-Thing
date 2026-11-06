@@ -6,6 +6,25 @@ import { ManualEntry } from "./ImportStep";
 import type { ImportNote, ProjectMapping, TimeEntry } from "@/lib/types";
 import { dailyTotals, findDuplicates, findOverlaps, mergeEntries, splitOverlapEvenly, totals, validate } from "@/lib/review";
 import { formatDecimalHours, listDates, parseHoursInput, prettyDate } from "@/lib/time";
+import { upsertRules } from "./MatchStep";
+import { uid } from "@/lib/uid";
+
+const MANUAL_MATCH_CODES = ["no-project", "ambiguous-project", "task-unclear", "convention-task-unmatched", "fuzzy-suggestion", "domain-match"];
+
+export function entryStatus(e: TimeEntry, project?: ProjectMapping): { label: string; tone: "neutral" | "info" | "warning" | "error" | "success" } {
+  if (!e.included) return { label: "Excluded", tone: "neutral" };
+  if (!e.projectId || !e.task) return { label: "Unmatched", tone: "error" };
+  if (e.confirmed) return { label: project && !project.billable ? "Confirmed · internal" : "Confirmed", tone: "success" };
+  return { label: project && !project.billable ? "Proposed · internal" : e.source === "manual" ? "Proposed (manual)" : "Proposed", tone: "info" };
+}
+
+export function durationWords(min: number): string {
+  const m = Math.round(min);
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"}`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return `${h} hour${h === 1 ? "" : "s"}${r ? ` ${r} min` : ""}`;
+}
 
 type Filter = "all" | "attention" | "included" | "excluded";
 
@@ -19,7 +38,7 @@ const STALE: Record<string, (e: TimeEntry) => boolean> = {
 export const liveNotes = (e: TimeEntry): ImportNote[] => e.notes.filter((n) => !STALE[n.code]?.(e));
 
 export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
-  const { entries, setEntries, projects, settings, setSettings, period } = useStore();
+  const { entries, setEntries, projects, settings, setSettings, period, rules, setRules } = useStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [flash, setFlash] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -38,8 +57,22 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
   const t = useMemo(() => totals(entries, projects), [entries, projects]);
   const daily = useMemo(() => dailyTotals(entries), [entries]);
   const errorCount = issues.filter((i) => i.level === "error").length;
+  const readyIds = entries.filter((e) => e.included && !e.confirmed && e.projectId && e.task && e.minutes > 0 && !errorsById.has(e.id)).map((e) => e.id);
+  const unapproved = entries.filter((e) => e.included && !e.confirmed).length;
 
-  const update = (id: string, patch: Partial<TimeEntry>) => setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  // Changing what an entry claims un-approves it, so approval always reflects the final values.
+  const update = (id: string, patch: Partial<TimeEntry>) =>
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch, confirmed: "confirmed" in patch ? patch.confirmed : ["minutes", "projectId", "task", "date", "included"].some((k) => k in patch) ? false : e.confirmed } : e)));
+  const approve = (ids: string[]) => {
+    const idSet = new Set(ids);
+    const next = entries.map((e) => (idSet.has(e.id) ? { ...e, confirmed: true } : e));
+    setEntries(next);
+    // Remember matches the user made themselves (unmatched/ambiguous/suggested at import time).
+    const learned = next.filter((e) => idSet.has(e.id) && e.notes.some((n) => MANUAL_MATCH_CODES.includes(n.code) || n.message === "Matched by you."));
+    if (learned.length) setRules(upsertRules(rules, learned));
+  };
+  const split = (id: string) =>
+    setEntries((prev) => prev.flatMap((e) => (e.id !== id ? [e] : [{ ...e, minutes: e.minutes / 2, confirmed: false }, { ...e, id: uid(), minutes: e.minutes / 2, confirmed: false, task: "", fingerprint: undefined, duplicateAck: true, notes: [{ code: "info", level: "info", message: "Split from another entry — choose the task for this part." }] }])));
   const remove = (id: string) => setEntries((prev) => prev.filter((e) => e.id !== id));
 
   const needsAttention = (e: TimeEntry) => e.included && (errorsById.has(e.id) || overlapIds.has(e.id) || dupIds.has(e.id) || liveNotes(e).some((n) => n.level === "warning"));
@@ -80,15 +113,15 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
       </div>
 
       {overlaps.filter((c) => c.unresolved).map((c) => (
-        <Notice key={c.date + c.entryIds.join()} tone="error" title={`Overlapping time on ${prettyDate(c.date)}`}>
+        <Notice key={c.date + c.entryIds.join()} tone="error" title={`${c.entryIds.length === 2 ? "Two" : c.entryIds.length} meetings overlap by ${durationWords(c.claimedMinutes - c.unionMinutes)} on ${prettyDate(c.date)}. Review before exporting.`}>
           <p>
-            {c.entryIds.length} entries claim <strong>{formatDecimalHours(c.claimedMinutes)} h</strong> but cover only <strong>{formatDecimalHours(c.unionMinutes)} h</strong> of clock time:{" "}
+            Together they claim <strong>{formatDecimalHours(c.claimedMinutes)} h</strong>, but only <strong>{formatDecimalHours(c.unionMinutes)} h</strong> of clock time passed:{" "}
             {entries.filter((e) => c.entryIds.includes(e.id)).map((e) => `${e.intervals.map((i) => `${i.start}–${i.end}`).join(", ")} ${e.description || e.title}`).join(" · ")}
           </p>
           <div className="row wrap gap-sm mt">
             <Button size="sm" onClick={() => {
               const split = splitOverlapEvenly(entries, c);
-              setEntries((prev) => prev.map((e) => (split[e.id] !== undefined ? { ...e, minutes: split[e.id] } : e)));
+              setEntries((prev) => prev.map((e) => (split[e.id] !== undefined ? { ...e, minutes: split[e.id], confirmed: false } : e)));
               setFlash("Overlapping time split evenly between the meetings. Adjust if you spent more time in one.");
             }}>Split overlap evenly</Button>
             <Button size="sm" variant="ghost" onClick={() => setEntries((prev) => prev.map((e) => (c.entryIds.includes(e.id) ? { ...e, overlapAck: true } : e)))}>Hours are correct as entered</Button>
@@ -139,8 +172,10 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
             setFlash(r.merged ? `Merged ${r.merged} entr${r.merged === 1 ? "y" : "ies"} into same-day lines.${r.skipped.length ? " " + r.skipped.join(" ") : ""}` : r.skipped.length ? r.skipped.join(" ") : "Nothing to merge — no two included entries share a date, project and task.");
           }}>Merge same day/project/task</Button>
           <Button size="sm" onClick={() => setShowAdd((s) => !s)}>{showAdd ? "Close" : "+ Add entry"}</Button>
+          <Button size="sm" variant="primary" disabled={!readyIds.length} onClick={() => approve(readyIds)}>Approve all ready ({readyIds.length})</Button>
         </div>
       </div>
+      {unapproved > 0 && <p className="small muted">{unapproved} included entr{unapproved === 1 ? "y is" : "ies are"} still proposed. Approve each line once you&apos;ve checked it against the time you actually worked — only approved lines can be exported.</p>}
       {flash && <Notice tone="success">{flash}</Notice>}
       {showAdd && <Card title="Add missing work"><ManualEntry compact /></Card>}
 
@@ -155,6 +190,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
               <th className="col-desc">Description</th>
               <th className="col-loc">Location</th>
               <th className="col-hours">Hours</th>
+              <th className="col-status">Status</th>
               <th className="col-act" aria-label="Actions" />
             </tr>
           </thead>
@@ -172,14 +208,15 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
                   </th>
                   <th className="col-hours day-total">{formatDecimalHours(daily[d] ?? 0)}</th>
                   <th />
+                  <th />
                 </tr>
                 {rows.length === 0 && (
                   <tr className="empty-row">
-                    <td colSpan={8} className="muted small">No entries</td>
+                    <td colSpan={9} className="muted small">No entries</td>
                   </tr>
                 )}
                 {rows.map((e) => (
-                  <EntryRow key={e.id} e={e} projects={projects} project={e.projectId ? byId.get(e.projectId) : undefined} errors={errorsById.get(e.id) ?? []} overlap={overlapIds.has(e.id)} dup={dupIds.has(e.id)} update={update} remove={remove} />
+                  <EntryRow key={e.id} e={e} projects={projects} project={e.projectId ? byId.get(e.projectId) : undefined} errors={errorsById.get(e.id) ?? []} overlap={overlapIds.has(e.id)} dup={dupIds.has(e.id)} update={update} remove={remove} approve={approve} split={split} />
                 ))}
               </tbody>
             );
@@ -188,6 +225,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
             <tr>
               <th colSpan={6}>Week total</th>
               <th className="col-hours">{formatDecimalHours(t.total)}</th>
+              <th />
               <th />
             </tr>
           </tfoot>
@@ -217,7 +255,8 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
   );
 }
 
-function EntryRow({ e, projects, project, errors, overlap, dup, update, remove }: { e: TimeEntry; projects: ProjectMapping[]; project?: ProjectMapping; errors: string[]; overlap: boolean; dup: boolean; update: (id: string, p: Partial<TimeEntry>) => void; remove: (id: string) => void }) {
+function EntryRow({ e, projects, project, errors, overlap, dup, update, remove, approve, split }: { e: TimeEntry; projects: ProjectMapping[]; project?: ProjectMapping; errors: string[]; overlap: boolean; dup: boolean; update: (id: string, p: Partial<TimeEntry>) => void; remove: (id: string) => void; approve: (ids: string[]) => void; split: (id: string) => void }) {
+  const st = entryStatus(e, project);
   const notes = liveNotes(e);
   const candidates = e.candidates?.length ? projects.filter((p) => e.candidates!.includes(p.id)) : [];
   const err = (c: string) => e.included && errors.includes(c);
@@ -234,7 +273,7 @@ function EntryRow({ e, projects, project, errors, overlap, dup, update, remove }
         <select className={err("project") ? "has-error" : ""} value={e.projectId ?? ""} aria-label="Project" onChange={(ev) => {
           const p = projects.find((x) => x.id === ev.target.value);
           const task = p ? (p.tasks.includes(e.task) ? e.task : p.tasks.length === 1 ? p.tasks[0] : p.defaultTask && p.tasks.includes(p.defaultTask) ? p.defaultTask : "") : "";
-          update(e.id, { projectId: p?.id ?? null, task, candidates: undefined });
+          update(e.id, { projectId: p?.id ?? null, task, candidates: undefined, suggestion: undefined });
         }}>
           <option value="">{candidates.length ? "Choose (ambiguous)…" : "Choose project…"}</option>
           {candidates.length > 0 && (
@@ -281,8 +320,21 @@ function EntryRow({ e, projects, project, errors, overlap, dup, update, remove }
       <td className="col-hours" data-label="Hours">
         <HoursInput minutes={e.minutes} invalid={err("hours")} onChange={(m) => update(e.id, { minutes: m })} />
       </td>
+      <td className="col-status" data-label="Status">
+        <Badge tone={st.tone}>{st.label}</Badge>
+        {e.included && (
+          e.confirmed ? (
+            <button className="link small" onClick={() => update(e.id, { confirmed: false })}>Undo</button>
+          ) : (
+            <Button size="sm" className="approve-btn" disabled={errors.length > 0 || !e.projectId || !e.task} onClick={() => approve([e.id])} aria-label={`Approve ${e.description || e.title}`}>✓ Approve</Button>
+          )
+        )}
+      </td>
       <td className="col-act">
-        <button className="icon-btn" aria-label="Delete entry" title="Delete entry" onClick={() => remove(e.id)}>🗑</button>
+        <div className="row-actions">
+          {e.included && e.minutes > 0 && <button className="icon-btn" aria-label="Split entry into two" title="Split into two entries (e.g. two tasks in one block)" onClick={() => split(e.id)}>✂</button>}
+          <button className="icon-btn" aria-label="Delete entry" title="Delete entry" onClick={() => remove(e.id)}>🗑</button>
+        </div>
       </td>
     </tr>
   );

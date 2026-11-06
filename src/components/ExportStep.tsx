@@ -8,8 +8,8 @@ import { encodeCsv, type CsvEncoding } from "@/lib/exporters/csv";
 import { reviewSummaryMarkdown } from "@/lib/summary";
 import { formatDecimalHours, toUSDate } from "@/lib/time";
 
-export function ExportStep({ onBack, onGuide }: { onBack: () => void; onGuide: () => void }) {
-  const { entries, projects, settings, period } = useStore();
+export function ExportStep({ onBack, onGuide, onExported }: { onBack: () => void; onGuide: () => void; onExported?: () => void }) {
+  const { entries, setEntries, projects, settings, period } = useStore();
   const [exporterId, setExporterId] = useState(EXPORTERS[0].id);
   const [encoding, setEncoding] = useState<CsvEncoding>("utf-8");
   const [confirmed, setConfirmed] = useState(false);
@@ -18,7 +18,8 @@ export function ExportStep({ onBack, onGuide }: { onBack: () => void; onGuide: (
   const ctx = { projects, settings, period };
 
   const issues = useMemo(() => [...validate(entries, ctx), ...exporter.validate(entries, ctx)], [entries, projects, settings, period, exporter]); // eslint-disable-line react-hooks/exhaustive-deps
-  const errors = issues.filter((i) => i.level === "error");
+  const unapproved = entries.filter((e) => e.included && !e.confirmed);
+  const errors = [...issues.filter((i) => i.level === "error"), ...(unapproved.length ? [{ level: "error" as const, code: "unapproved", message: `${unapproved.length} included entr${unapproved.length === 1 ? "y hasn't" : "ies haven't"} been approved yet. Approve each line in Review once you've checked it against the time you actually worked.` }] : [])];
   const warnings = issues.filter((i) => i.level === "warning");
   const csv = useMemo(() => buildCsv(exporter, entries, ctx), [exporter, entries, projects, settings, period]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = exporter.rows(entries, ctx);
@@ -61,11 +62,21 @@ export function ExportStep({ onBack, onGuide }: { onBack: () => void; onGuide: (
               <li key={k}>{i.message}</li>
             ))}
           </ul>
-          <Button size="sm" className="mt" onClick={onBack}>← Back to review</Button>
+          <div className="row wrap gap-sm mt">
+            <Button size="sm" onClick={onBack}>← Back to review</Button>
+            {unapproved.length > 0 && errors.length === 1 && (
+              <Button size="sm" variant="primary" onClick={() => {
+                if (window.confirm(`Approve all ${unapproved.length} remaining entries? Only do this if you have checked every line against the time you actually worked.`)) {
+                  const ids = new Set(unapproved.map((e) => e.id));
+                  setEntries(entries.map((e) => (ids.has(e.id) ? { ...e, confirmed: true } : e)));
+                }
+              }}>I've checked them — approve all {unapproved.length}</Button>
+            )}
+          </div>
         </Notice>
       ) : (
         <Notice tone="success" title="Validation passed">
-          Every included row has a valid date, positive decimal hours, a configured project code and task{settings.locationRequired ? ", a location" : ""}, and no unresolved overlaps or duplicates.
+          Every included row is approved and has a valid date, positive decimal hours, a saved project code and task{settings.locationRequired ? ", a location" : ""}, and no unresolved overlaps or duplicates.
         </Notice>
       )}
       {warnings.length > 0 && (
@@ -120,6 +131,7 @@ export function ExportStep({ onBack, onGuide }: { onBack: () => void; onGuide: (
           <Button variant="primary" disabled={!canDownload} onClick={() => {
             downloadBytes(encoded.bytes, fileName, encoding === "windows-1252" ? "text/csv;charset=windows-1252" : "text/csv;charset=utf-8");
             setDone(fileName);
+            onExported?.();
           }}>Download {fileName}</Button>
           <Button disabled={rows.length === 0} onClick={() => downloadBytes(reviewSummaryMarkdown(entries, projects, period, issues), fileName.replace(/\.csv$/, "_Review.md"), "text/markdown;charset=utf-8")}>Download review summary</Button>
           {!confirmed && errors.length === 0 && rows.length > 0 && <Badge tone="warning">Confirm your hours to enable download</Badge>}

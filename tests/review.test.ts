@@ -9,7 +9,7 @@ const entry = (id: string, start: string, end: string, minutes: number, extra: P
 });
 
 describe("overlaps", () => {
-  const es = [entry("tfg", "12:00", "13:00", 60), entry("qb", "12:30", "13:30", 60), entry("mw", "13:00", "14:00", 60), entry("k", "14:00", "14:30", 30)];
+  const es = [entry("a1", "12:00", "13:00", 60), entry("b2", "12:30", "13:30", 60), entry("c3", "13:00", "14:00", 60), entry("k", "14:00", "14:30", 30)];
   it("finds clusters and measures clock time", () => {
     const c = findOverlaps(es);
     expect(c).toHaveLength(1);
@@ -17,7 +17,7 @@ describe("overlaps", () => {
   });
   it("splits overlap evenly", () => {
     const split = splitOverlapEvenly(es, findOverlaps(es)[0]);
-    expect(split).toEqual({ tfg: 45, qb: 30, mw: 45 });
+    expect(split).toEqual({ a1: 45, b2: 30, c3: 45 });
     const fixed = es.map((e) => ({ ...e, minutes: split[e.id] ?? e.minutes }));
     expect(findOverlaps(fixed)[0].unresolved).toBe(false);
   });
@@ -35,7 +35,7 @@ describe("validation", () => {
     expect(codes).toEqual(["hours", "location", "project"]);
   });
   it("rejects tasks not configured for the project", () => {
-    const issues = validate([entry("a", "09:00", "10:00", 60, { task: "Springs" })], { projects, settings, period });
+    const issues = validate([entry("a", "09:00", "10:00", 60, { task: "Gears" })], { projects, settings, period });
     expect(issues.some((i) => i.code === "task")).toBe(true);
   });
   it("detects duplicates by fingerprint", () => {

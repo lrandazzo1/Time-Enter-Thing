@@ -4,7 +4,7 @@ import { stripTaskPrefix } from "./matching";
 import { toCsv } from "./exporters/csv";
 import { uid } from "./uid";
 
-export const PROJECT_CSV_COLUMNS = ["Client", "Aliases", "Project Code", "Tasks", "Default Task", "Type"];
+export const PROJECT_CSV_COLUMNS = ["Client", "Aliases", "Project Code", "Tasks", "Default Task", "Type", "Full Project Name"];
 
 const splitList = (s: string) =>
   s
@@ -76,7 +76,8 @@ export function parseProjectsCsv(text: string, opts: { stripNumericPrefixes: boo
       defaultTask = "";
     }
     if (!defaultTask && tasks.length === 1) defaultTask = tasks[0];
-    projects.push({ id: uid(), client: client || code, aliases: splitList(pick(r, "aliases", "alias", "alternatenames", "othernames")), code, tasks, defaultTask, billable });
+    const fullName = pick(r, "fullprojectname", "projectname", "fullname");
+    projects.push({ id: uid(), client: client || code, aliases: splitList(pick(r, "aliases", "alias", "alternatenames", "othernames")), code, tasks, defaultTask, billable, fullName: fullName || undefined, source: "file" });
   });
   if (projects.length === 0) throw new Error("No projects found in this CSV.");
   return { projects, warnings };
@@ -85,24 +86,39 @@ export function parseProjectsCsv(text: string, opts: { stripNumericPrefixes: boo
 export function projectsToCsv(projects: ProjectMapping[]): string {
   return toCsv([
     PROJECT_CSV_COLUMNS,
-    ...projects.map((p) => [p.client, p.aliases.join("; "), p.code, p.tasks.join("; "), p.defaultTask, p.billable ? "Billable" : "Internal"]),
+    ...projects.map((p) => [p.client, p.aliases.join("; "), p.code, p.tasks.join("; "), p.defaultTask, p.billable ? "Billable" : "Internal", p.fullName ?? ""]),
   ]);
 }
 
-/** Merge imported projects into an existing list (same project code → update). */
-export function mergeProjects(existing: ProjectMapping[], incoming: ProjectMapping[]): { projects: ProjectMapping[]; added: number; updated: number } {
-  const out = existing.map((p) => ({ ...p }));
+/**
+ * Add imported projects to the saved list without losing anything already configured.
+ * Same project code (or, for code-less entries, same client) → tasks and aliases are combined;
+ * the saved client name, type and default task are kept.
+ */
+export function mergeProjects(existing: ProjectMapping[], incoming: ProjectMapping[]): { projects: ProjectMapping[]; added: number; updated: number; newTasks: number } {
+  const out = existing.map((p) => ({ ...p, tasks: [...p.tasks], aliases: [...p.aliases] }));
   let added = 0;
   let updated = 0;
+  let newTasks = 0;
   for (const inc of incoming) {
-    const i = out.findIndex((p) => p.code.trim().toLowerCase() === inc.code.trim().toLowerCase() && p.client.trim().toLowerCase() === inc.client.trim().toLowerCase());
-    if (i >= 0) {
-      out[i] = { ...inc, id: out[i].id };
-      updated++;
-    } else {
-      out.push(inc);
+    const code = inc.code.trim().toLowerCase();
+    const i = out.findIndex((p) => (code ? p.code.trim().toLowerCase() === code : !p.code.trim() && p.client.trim().toLowerCase() === inc.client.trim().toLowerCase()));
+    if (i < 0) {
+      out.push({ ...inc, tasks: [...new Set(inc.tasks)], aliases: [...new Set(inc.aliases)] });
       added++;
+      newTasks += inc.tasks.length;
+      continue;
     }
+    const cur = out[i];
+    const before = cur.tasks.length + cur.aliases.length;
+    for (const t of inc.tasks) if (!cur.tasks.some((x) => x.toLowerCase() === t.toLowerCase())) {
+      cur.tasks.push(t);
+      newTasks++;
+    }
+    for (const a of inc.aliases) if (!cur.aliases.some((x) => x.toLowerCase() === a.toLowerCase()) && a.toLowerCase() !== cur.client.toLowerCase()) cur.aliases.push(a);
+    if (!cur.fullName && inc.fullName) cur.fullName = inc.fullName;
+    if (!cur.defaultTask && cur.tasks.length === 1) cur.defaultTask = cur.tasks[0];
+    if (cur.tasks.length + cur.aliases.length !== before) updated++;
   }
-  return { projects: out, added, updated };
+  return { projects: out, added, updated, newTasks };
 }

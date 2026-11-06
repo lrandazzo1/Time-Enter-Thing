@@ -1,72 +1,57 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "./store";
-import { Badge, Button, Card, Dropzone, Notice, downloadBytes, readText } from "./ui";
+import { Badge, Button, Card, Notice, downloadBytes } from "./ui";
+import { ProjectImporter } from "./ProjectImporter";
 import type { ProjectMapping, Settings } from "@/lib/types";
-import { mergeProjects, parseProjectsCsv, projectsToCsv, validateProject } from "@/lib/projectsCsv";
+import { projectsToCsv, validateProject } from "@/lib/projectsCsv";
 import { stripTaskPrefix } from "@/lib/matching";
-import { makeBackup, parseBackup, saveAccessCode, loadAccessCode } from "@/lib/storage";
-import { extractProjectsFromScreenshot, fetchAiStatus, type AiStatus, type ExtractedProject } from "@/lib/aiClient";
+import { clearEverything, makeBackup } from "@/lib/storage";
 import { isValidTimeZone } from "@/lib/time";
 import { uid } from "@/lib/uid";
 
-const TEMPLATE = `Client,Aliases,Project Code,Tasks,Default Task,Type
-Acme Corp,Acme; ACME Inc,P000123-001,Planning; Support,,Billable
-Globex,,P000456-001,Consultant,Consultant,Billable
-Our Firm (internal),Internal; Team,P000999-001,Internal - Meeting; Internal - Training,Internal - Meeting,Internal
-`;
+const blank = (): ProjectMapping => ({ id: uid(), client: "", aliases: [], code: "", tasks: [], defaultTask: "", billable: true, source: "manual" });
 
-const blank = (): ProjectMapping => ({ id: uid(), client: "", aliases: [], code: "", tasks: [], defaultTask: "", billable: true });
-
-export function ProjectsPage() {
-  const { projects, setProjects, settings, setSettings } = useStore();
+export function ProjectsPage({ onRestartSetup }: { onRestartSetup: () => void }) {
+  const { projects, setProjects, settings, setSettings, rules, setRules } = useStore();
   const [editing, setEditing] = useState<ProjectMapping | null>(null);
-  const [msg, setMsg] = useState<{ tone: "success" | "error" | "warning"; text: string } | null>(null);
-  const [strip, setStrip] = useState(true);
-
-  async function importCsv(files: File[]) {
-    setMsg(null);
-    try {
-      const text = await readText(files[0]);
-      if (/^\s*\{/.test(text)) {
-        const b = parseBackup(text);
-        setProjects(b.projects);
-        setSettings(b.settings);
-        setMsg({ tone: "success", text: `Restored ${b.projects.length} projects and your settings from backup.` });
-        return;
-      }
-      const r = parseProjectsCsv(text, { stripNumericPrefixes: strip });
-      const m = mergeProjects(projects, r.projects);
-      setProjects(m.projects);
-      setMsg({ tone: r.warnings.length ? "warning" : "success", text: `Imported ${r.projects.length} projects (${m.added} added, ${m.updated} updated).${r.warnings.length ? " " + r.warnings.join(" ") : ""}` });
-    } catch (e) {
-      setMsg({ tone: "error", text: (e as Error).message });
-    }
-  }
+  const [showImport, setShowImport] = useState(projects.length === 0);
+  const [query, setQuery] = useState("");
+  const complete = projects.filter((p) => p.code && p.tasks.length > 0).length;
+  const shown = projects.filter((p) => !query.trim() || [p.client, p.code, p.fullName ?? "", ...p.tasks, ...p.aliases].join(" ").toLowerCase().includes(query.trim().toLowerCase()));
+  const byId = new Map(projects.map((p) => [p.id, p]));
 
   return (
     <div className="stack">
       <div className="page-head">
         <div>
-          <h1>Projects &amp; tasks</h1>
-          <p className="muted">Your BigTime assignments. Stored only in this browser — other people using this site never see them.</p>
+          <h1>Projects</h1>
+          <p className="muted">
+            <strong>{projects.length}</strong> saved project{projects.length === 1 ? "" : "s"} · {complete} ready for time entry. Stored only in this browser on this device.
+          </p>
+        </div>
+        <div className="row wrap gap-sm">
+          <Button variant="primary" onClick={() => setShowImport((s) => !s)}>{showImport ? "Hide import" : "Import projects"}</Button>
+          <Button onClick={() => setEditing(blank())}>+ Add manually</Button>
         </div>
       </div>
 
-      <SettingsCard settings={settings} setSettings={setSettings} />
+      {showImport && (
+        <Card title="Import from Projector" subtitle="Scan screenshots, paste copied text, or import a file. New projects are added; existing ones keep their settings and gain any new tasks.">
+          <ProjectImporter />
+        </Card>
+      )}
 
       <Card
-        title={`Your projects (${projects.length})`}
-        subtitle="Calendar events are matched by client name, aliases or project code. Task names must match BigTime exactly — without the sequence numbers BigTime shows in front of them."
-        actions={<Button variant="primary" onClick={() => setEditing(blank())}>+ Add project</Button>}
+        title="Saved projects"
+        subtitle="Calendar events are matched by project code, client name or alias. Task names must match BigTime exactly."
+        actions={projects.length > 6 ? <input className="input-sm" placeholder="Search projects" aria-label="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} /> : undefined}
       >
         {editing && !projects.some((p) => p.id === editing.id) && (
           <ProjectEditor key={editing.id} value={editing} all={projects} onCancel={() => setEditing(null)} onSave={(p) => { setProjects([...projects, p]); setEditing(null); }} />
         )}
         {projects.length === 0 && !editing ? (
-          <div className="empty">
-            <p>No projects yet. Add them one at a time, or import a CSV below.</p>
-          </div>
+          <div className="empty"><p>No projects yet. Use <strong>Import projects</strong> above — scanning a few screenshots is usually fastest.</p></div>
         ) : (
           <div className="table-wrap">
             <table className="projects-table">
@@ -80,7 +65,7 @@ export function ProjectsPage() {
                 </tr>
               </thead>
               <tbody>
-                {projects.map((p) =>
+                {shown.map((p) =>
                   editing?.id === p.id ? (
                     <tr key={p.id}>
                       <td colSpan={5}>
@@ -88,7 +73,12 @@ export function ProjectsPage() {
                       </td>
                     </tr>
                   ) : (
-                    <ProjectRow key={p.id} p={p} all={projects} onEdit={() => setEditing(p)} onDelete={() => window.confirm(`Delete ${p.client} (${p.code})?`) && setProjects(projects.filter((x) => x.id !== p.id))} />
+                    <ProjectRow key={p.id} p={p} all={projects} onEdit={() => setEditing(p)} onDelete={() => {
+                      if (window.confirm(`Delete ${p.client} (${p.code})?`)) {
+                        setProjects(projects.filter((x) => x.id !== p.id));
+                        setRules(rules.filter((r) => r.projectId !== p.id));
+                      }
+                    }} />
                   ),
                 )}
               </tbody>
@@ -97,26 +87,40 @@ export function ProjectsPage() {
         )}
       </Card>
 
-      <Card title="Import or back up your mapping" subtitle="CSV columns: Client, Aliases, Project Code, Tasks, Default Task, Type. Separate multiple aliases or tasks with semicolons.">
-        <Dropzone accept=".csv,.json,text/csv,application/json" onFiles={importCsv} label={<><strong>Drop a projects CSV</strong> (or a backup .json) here</>} hint="Rows with the same client and project code update existing entries." icon="🗂️" />
-        <label className="check mt">
-          <input type="checkbox" checked={strip} onChange={(e) => setStrip(e.target.checked)} />
-          <span>Remove leading numbers from task names (e.g. “2 Planning” → “Planning”). BigTime&apos;s import rejects the numbered form.</span>
-        </label>
-        <div className="row wrap gap-sm mt">
-          <Button size="sm" onClick={() => downloadBytes(TEMPLATE, "projects-template.csv", "text/csv;charset=utf-8")}>Download template</Button>
-          <Button size="sm" disabled={!projects.length} onClick={() => downloadBytes(projectsToCsv(projects), "my-bigtime-projects.csv", "text/csv;charset=utf-8")}>Export projects CSV</Button>
-          <Button size="sm" onClick={() => downloadBytes(JSON.stringify(makeBackup(projects, settings), null, 2), "timesheet-converter-backup.json", "application/json")}>Back up projects + settings</Button>
-          <Button size="sm" variant="danger" disabled={!projects.length} onClick={() => window.confirm("Delete all projects from this browser?") && setProjects([])}>Delete all</Button>
-        </div>
-        {msg && <div className="mt"><Notice tone={msg.tone}>{msg.text}</Notice></div>}
+      <Card title={`Remembered matches (${rules.length})`} subtitle="When you confirm which project a meeting belongs to, the app remembers it for future weeks.">
+        {rules.length === 0 ? (
+          <p className="muted small">None yet. They are added when you approve entries you matched yourself.</p>
+        ) : (
+          <ul className="resolve-list">
+            {rules.map((r) => {
+              const p = byId.get(r.projectId);
+              return (
+                <li key={r.id}>
+                  <div><strong>{r.example}</strong> <span className="muted small">→ {p ? `${p.client} · ${r.task || "no task"}` : "deleted project"}</span></div>
+                  <Button size="sm" variant="ghost" onClick={() => setRules(rules.filter((x) => x.id !== r.id))}>Forget</Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </Card>
 
-      <ProjectScreenshotCard onAdd={(ps) => {
-        const m = mergeProjects(projects, ps);
-        setProjects(m.projects);
-        setMsg({ tone: "success", text: `Added ${m.added} and updated ${m.updated} projects from the screenshot. Review the tasks below.` });
-      }} />
+      <SettingsCard settings={settings} setSettings={setSettings} />
+
+      <Card title="Backup & reset" subtitle="Browser storage belongs to this browser on this device and is erased if you clear site data. Download a backup to move to another computer or browser.">
+        <div className="row wrap gap-sm">
+          <Button size="sm" onClick={() => downloadBytes(JSON.stringify(makeBackup(projects, settings, rules), null, 2), "timesheet-converter-backup.json", "application/json")}>Download backup (.json)</Button>
+          <Button size="sm" disabled={!projects.length} onClick={() => downloadBytes(projectsToCsv(projects), "my-bigtime-projects.csv", "text/csv;charset=utf-8")}>Export projects CSV</Button>
+          <Button size="sm" onClick={onRestartSetup}>Restart setup wizard</Button>
+          <Button size="sm" variant="danger" onClick={() => {
+            if (window.confirm("Erase all projects, settings, remembered matches and the current timesheet from this browser?")) {
+              clearEverything();
+              window.location.reload();
+            }
+          }}>Erase all data in this browser</Button>
+        </div>
+        <p className="small muted mt">To restore a backup, choose <em>Import projects → Import a file</em>.</p>
+      </Card>
     </div>
   );
 }
@@ -252,6 +256,10 @@ function SettingsCard({ settings, setSettings }: { settings: Settings; setSettin
           <span>Exclude events whose title contains (comma-separated)</span>
           <input value={kw} onChange={(e) => setKw(e.target.value)} onBlur={() => setSettings({ ...settings, exclusionKeywords: kw.split(",").map((k) => k.trim()).filter(Boolean) })} />
         </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={settings.keepTaskNumbers} onChange={(e) => setSettings({ ...settings, keepTaskNumbers: e.target.checked })} />
+          <span>Keep Projector&apos;s numeric task prefixes when importing (“2 Planning”). Off = “Planning”, which is what the tested BigTime import accepts.</span>
+        </label>
         <label className="field">
           <span>Outlook CSV date order</span>
           <select value={settings.csvDateOrder} onChange={(e) => setSettings({ ...settings, csvDateOrder: e.target.value as Settings["csvDateOrder"] })}>
@@ -265,101 +273,3 @@ function SettingsCard({ settings, setSettings }: { settings: Settings; setSettin
   );
 }
 
-function ProjectScreenshotCard({ onAdd }: { onAdd: (p: ProjectMapping[]) => void }) {
-  const [status, setStatus] = useState<AiStatus | null>(null);
-  const [consent, setConsent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [found, setFound] = useState<(ExtractedProject & { pick: boolean })[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [strip, setStrip] = useState(true);
-  const [code, setCode] = useState("");
-  useEffect(() => {
-    fetchAiStatus().then(setStatus);
-    setCode(loadAccessCode());
-  }, []);
-
-  async function run(files: File[]) {
-    setError(null);
-    if (!consent) return setError("Tick the consent box first.");
-    if (status?.accessCodeRequired) saveAccessCode(code.trim());
-    setBusy(true);
-    try {
-      const all: ExtractedProject[] = [];
-      const w: string[] = [];
-      for (const f of files) {
-        const r = await extractProjectsFromScreenshot(f);
-        all.push(...r.projects);
-        w.push(...r.warnings);
-      }
-      setFound(all.map((p) => ({ ...p, pick: Boolean(p.project_code) })));
-      setWarnings(w);
-      if (!all.length) setError("No projects could be read from that screenshot.");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card title="Read projects from a BigTime screenshot (optional, AI)" subtitle="Upload a screenshot of your BigTime project/task list and approve the proposed mapping.">
-      {!status ? (
-        <p className="muted">Checking AI availability…</p>
-      ) : !status.ai ? (
-        <Notice tone="info">Not available on this site — the server has no AI key configured. Add projects manually or by CSV instead.</Notice>
-      ) : (
-        <>
-          <label className="check">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>Send the screenshot to Anthropic ({status.model}) for this one request. It is not stored by this site.</span>
-          </label>
-          {status.accessCodeRequired && (
-            <label className="field mt">
-              <span>Access code</span>
-              <input type="password" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" />
-            </label>
-          )}
-          <div className="mt">
-            <Dropzone accept="image/*" multiple onFiles={run} label={busy ? "Reading…" : <><strong>Drop BigTime screenshots</strong> or click</>} icon="🔎" />
-          </div>
-          {error && <Notice tone="error">{error}</Notice>}
-          {warnings.length > 0 && <Notice tone="warning">{warnings.join(" ")}</Notice>}
-          {found.length > 0 && (
-            <div className="mt">
-              <label className="check">
-                <input type="checkbox" checked={strip} onChange={(e) => setStrip(e.target.checked)} />
-                <span>Remove leading numbers from task names</span>
-              </label>
-              <div className="table-wrap mt">
-                <table className="projects-table">
-                  <thead>
-                    <tr><th>Add</th><th>Client</th><th>Code</th><th>Tasks</th><th>Notes</th></tr>
-                  </thead>
-                  <tbody>
-                    {found.map((p, i) => (
-                      <tr key={i}>
-                        <td><input type="checkbox" checked={p.pick} disabled={!p.project_code} onChange={(e) => setFound(found.map((x, j) => (j === i ? { ...x, pick: e.target.checked } : x)))} /></td>
-                        <td>{p.client || p.project_name}</td>
-                        <td><code>{p.project_code || "—"}</code></td>
-                        <td>{p.tasks.map((t) => (strip ? stripTaskPrefix(t) : t)).join(", ") || "—"}</td>
-                        <td className="small muted">{p.notes}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Button variant="primary" className="mt" disabled={!found.some((p) => p.pick)} onClick={() => {
-                onAdd(found.filter((p) => p.pick).map((p) => {
-                  const tasks = [...new Set(p.tasks.map((t) => (strip ? stripTaskPrefix(t) : t.trim())).filter(Boolean))];
-                  return { id: uid(), client: p.client || p.project_name, aliases: p.project_name && p.project_name !== p.client ? [p.project_name] : [], code: p.project_code, tasks, defaultTask: tasks.length === 1 ? tasks[0] : "", billable: !p.looks_internal };
-                }));
-                setFound([]);
-              }}>Add selected projects</Button>
-            </div>
-          )}
-        </>
-      )}
-    </Card>
-  );
-}

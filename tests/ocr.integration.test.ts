@@ -1,0 +1,113 @@
+/**
+ * Real OCR integration test: synthetic Projector screenshots → Tesseract.js (local model, no network)
+ * → engine-independent OcrPage → Projector parser. Run with `npm test`.
+ */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createWorker, OEM, PSM, type Worker } from "tesseract.js";
+import { PNG } from "pngjs";
+import { fromTesseract, type OcrPage } from "@/lib/ocr/types";
+import { chooseScale, enhance } from "@/lib/ocr/enhance";
+import { parseProjectorPages, projectStatus } from "@/lib/projector/parse";
+
+const FIX = "tests/fixtures/projector";
+let worker: Worker;
+
+/** Same pipeline as the browser: decode → enhance (upscale/grayscale/contrast/invert) → OCR. */
+async function ocr(file: string): Promise<OcrPage> {
+  const png = PNG.sync.read(readFileSync(path.join(FIX, file)));
+  const scale = chooseScale(png.width, png.height);
+  const e = enhance({ data: png.data, width: png.width, height: png.height }, scale);
+  const out = new PNG({ width: e.width, height: e.height });
+  out.data = Buffer.from(e.data);
+  const { data } = await worker.recognize(PNG.sync.write(out), {}, { blocks: true, text: true });
+  return fromTesseract(file, data, png.width, png.height, scale);
+}
+
+beforeAll(async () => {
+  worker = await createWorker("eng", OEM.LSTM_ONLY, {
+    langPath: path.resolve("node_modules/@tesseract.js-data/eng/4.0.0_best_int"),
+    gzip: true,
+    cacheMethod: "none",
+  });
+  await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: "1" });
+}, 60_000);
+afterAll(async () => worker?.terminate());
+
+describe("OCR → Projector parser (real images)", () => {
+  it("reads a full project list", async () => {
+    const page = await ocr("projector-list-1.png");
+    const r = parseProjectorPages([page]);
+    const summary = r.projects.map((p) => ({ client: p.client, code: p.code, status: p.codeStatus, tasks: p.tasks.map((t) => t.name) }));
+    console.log("projector-list-1 →", JSON.stringify(summary));
+    expect(summary).toEqual([
+      { client: "Acme Components", code: "P001234-001", status: "valid", tasks: ["Planning", "Gears", "Bearings", "Precision Parts"] },
+      { client: "Globex Corporation", code: "P005678-001", status: "valid", tasks: ["Planning Consultant"] },
+      { client: "Smith-Jones Holdings", code: "P002468-002", status: "valid", tasks: ["Consultant"] },
+      { client: "Our Firm", code: "P000999-001", status: "valid", tasks: ["Internal - Meeting"] },
+    ]);
+    expect(r.projects.every((p) => projectStatus(p) === "verified")).toBe(true);
+  }, 60_000);
+
+  it("reads a dark-mode screenshot (after inversion the same data is found)", async () => {
+    const r = parseProjectorPages([await ocr("projector-list-1-dark.png")]);
+    console.log("dark →", JSON.stringify(r.projects.map((p) => [p.code, p.codeStatus, p.tasks.length])));
+    expect(r.projects.map((p) => p.code)).toEqual(["P001234-001", "P005678-001", "P002468-002", "P000999-001"]);
+  }, 60_000);
+
+  it("combines a multi-screenshot batch: continuation, overlap and merging", async () => {
+    const pages = [await ocr("projector-list-1.png"), await ocr("projector-list-2.png"), await ocr("projector-list-3.png")];
+    const r = parseProjectorPages(pages);
+    const summary = r.projects.map((p) => [p.client, p.code, p.tasks.map((t) => t.name).join("; ")]);
+    console.log("batch →", JSON.stringify(summary), "orphans →", JSON.stringify(r.orphanTasks.map((o) => o.task.name)));
+    expect(summary).toEqual([
+      ["Acme Components", "P001234-001", "Planning; Gears; Bearings; Precision Parts"],
+      ["Globex Corporation", "P005678-001", "Planning Consultant"],
+      ["Smith-Jones Holdings", "P002468-002", "Consultant"],
+      ["Our Firm", "P000999-001", "Internal - Meeting"],
+      ["The Metro Public Library (MPL)", "P007979-001", "Planning"],
+      ["Initech", "P003141-001", "Support; Integration; Training"],
+      ["Umbrella Health", "P008080-003", "Planning"],
+    ]);
+    // "11 Internal - Training" sits above the first project on screenshot 2: offered, not assigned.
+    expect(r.orphanTasks.map((o) => o.task.name)).toEqual(["Internal - Training"]);
+    expect(r.orphanTasks[0].likelyProjectKey).toBe(r.projects[3].key);
+  }, 120_000);
+});
+
+describe("OCR limits and calendar screenshots (real images)", () => {
+  it("a small, blurry, compressed screenshot never yields a wrong 'valid' code", async () => {
+    const r = parseProjectorPages([await ocr("projector-list-1-degraded.png")]);
+    const truth = new Set(["P001234-001", "P005678-001", "P002468-002", "P000999-001"]);
+    console.log("degraded →", JSON.stringify(r.projects.map((p) => [p.client, p.code, p.codeStatus, p.tasks.map((t) => t.name)])));
+    for (const p of r.projects) {
+      if (p.codeStatus === "valid") expect(truth.has(p.code)).toBe(true);
+      else expect(projectStatus(p)).toBe("review");
+    }
+  }, 60_000);
+
+  it("reads visible titles/times from an Outlook-style week view; no times are invented", async () => {
+    const { calendarEventsFromOcr } = await import("@/lib/parsers/calendarOcr");
+    await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+    const png = PNG.sync.read(readFileSync("tests/fixtures/calendar-week.png"));
+    const scale = chooseScale(png.width, png.height);
+    const e = enhance({ data: png.data, width: png.width, height: png.height }, scale);
+    const out = new PNG({ width: e.width, height: e.height });
+    out.data = Buffer.from(e.data);
+    const { data } = await worker.recognize(PNG.sync.write(out), {}, { blocks: true, text: true });
+    await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+    const page = fromTesseract("calendar-week.png", data, png.width, png.height, scale);
+    const { events } = calendarEventsFromOcr([page], { start: "2026-11-02", end: "2026-11-08" }, { csvDateOrder: "MDY" });
+    const summary = events.map((ev) => [ev.date, ev.title, ev.start, ev.end]);
+    console.log("calendar →", JSON.stringify(summary));
+    const byTitle = (s: string) => events.find((ev) => ev.title.includes(s));
+    expect(byTitle("Forecast model")).toMatchObject({ date: "2026-11-02", start: "09:00", end: "10:30" });
+    expect(byTitle("Initech")).toMatchObject({ date: "2026-11-03", start: "13:00", end: "14:15" });
+    const globex = byTitle("Globex");
+    expect(globex).toMatchObject({ date: "2026-11-02", start: null, end: null, minutes: null });
+    expect(globex!.parseNotes!.some((n) => n.code === "screenshot-time")).toBe(true);
+    expect(byTitle("Umbrella")).toMatchObject({ date: "2026-11-04", start: null });
+    expect(events.every((ev) => ev.parseNotes?.some((n) => n.code === "screenshot-date"))).toBe(true);
+  }, 60_000);
+});

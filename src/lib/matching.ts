@@ -1,4 +1,6 @@
-import type { CalendarEvent, ImportNote, ProjectMapping, Settings, TimeEntry } from "./types";
+import type { CalendarEvent, ImportNote, MatchRule, ProjectMapping, Settings, TimeEntry } from "./types";
+import { bestFuzzy, domainMatchesClient } from "./fuzzy";
+import { findCodes } from "./projector/codes";
 import { fromMinutes, intervalMinutes, toMinutes } from "./time";
 import { uid } from "./uid";
 
@@ -51,7 +53,7 @@ function tasksMentioned(text: string, project: ProjectMapping): string[] {
     .sort((a, b) => b.length - a.length);
 }
 
-function cleanTitle(title: string): string {
+export function cleanTitle(title: string): string {
   return title.replace(/^\s*(cancel+ed|updated|fw|fwd|re)\s*:\s*/i, "").trim();
 }
 
@@ -67,17 +69,35 @@ export interface MatchResult {
  * Deterministic matcher. Never guesses: when the project or task is not clear it leaves the
  * field empty and records why, so the review screen can ask the user.
  *
- * 1. Naming convention "CLIENT | TASK | WORK DESCRIPTION" (preferred, exact).
- * 2. Otherwise search the title (then description) for a configured client name / alias / project code.
+ * Priority: (remembered title rules are applied by eventToEntry first)
+ * 1. Exact project code in the title/description (e.g. "P001234-001").
+ * 2. Naming convention "CLIENT | TASK | WORK DESCRIPTION" with a known client/alias.
+ * 3. Exact client name or alias as a whole phrase in the title, then the description.
+ * (4. organizer e-mail domain and 5. fuzzy suggestions are handled by eventToEntry.)
  */
 export function matchEvent(title: string, description: string, projects: ProjectMapping[]): MatchResult {
   const notes: ImportNote[] = [];
   const t = cleanTitle(title);
   const parts = t.split("|").map((s) => s.trim());
 
+  // 1. exact project code
+  const coded = [...findCodes(t), ...findCodes(description)].filter((c) => c.status === "valid").map((c) => projects.find((p) => p.code.toUpperCase() === c.raw.toUpperCase())).filter((p): p is ProjectMapping => Boolean(p));
+  const codedUnique = [...new Set(coded)];
+  if (codedUnique.length === 1) {
+    const project = codedUnique[0];
+    const mentioned = tasksMentioned(t + " " + description, project);
+    const task = mentioned.length === 1 ? mentioned[0] : resolveDefaultTask(project) ?? "";
+    if (!task) notes.push({ code: "task-unclear", level: "warning", message: `Choose which ${project.client} task this was.` });
+    const desc = parts.length >= 3 ? parts.slice(2).join(" | ").trim() : t;
+    return { projectId: project.id, task, description: desc || t, notes };
+  }
+
   if (parts.length >= 2 && parts[0]) {
-    const project = findProjectByName(parts[0], projects);
+    let project = findProjectByName(parts[0], projects);
     const desc = parts.slice(2).join(" | ").trim();
+    // "Our Firm | Acme: Working Session" — an internal (own-company) name in front of a client name
+    // is not the naming convention; let the client match below decide.
+    if (project && !project.billable && projects.some((p) => p.billable && namesOf(p).some((n) => containsPhrase(parts.slice(1).join(" "), n)))) project = null;
     if (project) {
       const task = parts[1] ? findTask(parts[1], project) : null;
       if (task) return { projectId: project.id, task, description: desc || t, notes };
@@ -106,7 +126,13 @@ export function matchEvent(title: string, description: string, projects: Project
   const searchIn = [t, description];
   for (const [i, text] of searchIn.entries()) {
     if (!text) continue;
-    const hits = projects.filter((p) => namesOf(p).some((n) => containsPhrase(text, n)));
+    let hits = projects.filter((p) => namesOf(p).some((n) => containsPhrase(text, n)));
+    // An internal project's client name is usually your own company, which appears in many client
+    // meeting titles ("Acme | Our Firm Working Session"). If it only matched by that name and a billable
+    // client also matched, prefer the client. An explicit alias (e.g. "INTERNAL") still counts.
+    if (hits.some((p) => p.billable)) {
+      hits = hits.filter((p) => p.billable || [p.code, ...p.aliases].some((n) => n.trim().length >= 2 && containsPhrase(text, n)));
+    }
     // Prefer the most specific (longest) name when one hit's name contains another's.
     const unique = dedupeBySpecificity(hits, text);
     if (unique.length === 1) {
@@ -135,7 +161,8 @@ export function matchEvent(title: string, description: string, projects: Project
     }
   }
   notes.push({ code: "no-project", level: "warning", message: "No configured client or project found in this event." });
-  return { projectId: null, task: "", description: t, notes };
+  // "Unknown Client | Task | Work description": keep the description part.
+  return { projectId: null, task: "", description: parts.length >= 3 && parts.slice(2).join(" | ").trim() ? parts.slice(2).join(" | ").trim() : t, notes };
 }
 
 function resolveDefaultTask(p: ProjectMapping): string | null {
@@ -156,34 +183,66 @@ export function fingerprintOf(date: string, start: string | null, end: string | 
 }
 
 /** Turn a parsed calendar event into a proposed time entry (matching + exclusion rules). */
-export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], settings: Settings): TimeEntry {
-  const m = matchEvent(ev.title, ev.description, projects);
+/** Description for a title: the third segment of "CLIENT | TASK | DESCRIPTION", otherwise the cleaned title. */
+export function defaultDescription(title: string): string {
+  const t = cleanTitle(title);
+  const parts = t.split("|").map((x) => x.trim());
+  const d = parts.length >= 3 ? parts.slice(2).join(" | ").trim() : "";
+  return d || t;
+}
+
+/** Normalized key for remembering a confirmed title → project/task assignment. */
+export function ruleKey(title: string): string {
+  return normalize(cleanTitle(title))
+    .replace(/\b\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?\b/g, " ")
+    .replace(/[^a-z0-9&|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** A short, human label for a client the calendar mentions but that isn't configured. */
+export function unknownClientHint(title: string, domains: string[] = []): string {
+  const t = cleanTitle(title);
+  const parts = t.split("|").map((x) => x.trim()).filter(Boolean);
+  if (parts.length >= 2 && parts[0].length <= 60) return parts[0];
+  const d = domains[0];
+  if (d) return d;
+  return t.length > 60 ? t.slice(0, 57) + "…" : t;
+}
+
+export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], settings: Settings, rules: MatchRule[] = []): TimeEntry {
+  const rule = rules.find((r) => r.key === ruleKey(ev.title) && projects.some((p) => p.id === r.projectId));
+  const m = rule
+    ? { projectId: rule.projectId, task: projects.find((p) => p.id === rule.projectId)!.tasks.includes(rule.task) ? rule.task : "", description: defaultDescription(ev.title), notes: [{ code: "remembered", level: "info", message: "Matched using an assignment you confirmed before." } as ImportNote], candidates: undefined }
+    : matchEvent(ev.title, ev.description, projects);
   const notes: ImportNote[] = [...m.notes];
   let projectId = m.projectId;
   let task = m.task;
   let candidates = m.candidates;
+  let suggestion: TimeEntry["suggestion"];
 
-  if (ev.ai) {
-    const aiProject = projects.find((p) => p.code.toLowerCase() === ev.ai!.projectCode.trim().toLowerCase()) ?? null;
-    const aiTask = aiProject && ev.ai.task ? findTask(ev.ai.task, aiProject) : null;
-    if (!projectId && aiProject && !candidates) {
-      projectId = aiProject.id;
-      task = task || aiTask || "";
-      notes.push({ code: "ai-suggested", level: "warning", message: `AI suggested ${aiProject.client}${aiTask ? ` / ${aiTask}` : ""} — confirm.` });
+  // 4. organizer / attendee e-mail domain (strong contextual signal, still shown for confirmation)
+  if (!projectId && !candidates && ev.domains?.length) {
+    const byDomain = projects.filter((p) => p.billable && ev.domains!.some((d) => domainMatchesClient(d, p.client) || p.aliases.some((a) => domainMatchesClient(d, a))));
+    if (byDomain.length === 1) {
+      const p = byDomain[0];
+      projectId = p.id;
+      task = resolveDefaultTask(p) ?? "";
       const i = notes.findIndex((n) => n.code === "no-project");
       if (i >= 0) notes.splice(i, 1);
-      if (!task && aiProject.tasks.length > 1) notes.push({ code: "task-unclear", level: "warning", message: `Choose which ${aiProject.client} task this was.` });
-    } else if (projectId && aiProject && aiProject.id !== projectId) {
-      notes.push({ code: "ai-disagrees", level: "warning", message: `AI suggested ${aiProject.client} instead — check the project.` });
-    } else if (projectId && aiProject && aiTask && !task) {
-      task = aiTask;
-      notes.push({ code: "ai-suggested", level: "warning", message: `AI suggested task "${aiTask}" — confirm.` });
-      const i = notes.findIndex((n) => n.code === "task-unclear");
-      if (i >= 0) notes.splice(i, 1);
+      notes.push({ code: "domain-match", level: "warning", message: `Matched ${p.client} from the meeting's e-mail domain (${ev.domains!.find((d) => domainMatchesClient(d, p.client) || p.aliases.some((a) => domainMatchesClient(d, a)))}) — confirm.` });
+      if (!task) notes.push({ code: "task-unclear", level: "warning", message: `Choose which ${p.client} task this was.` });
+    } else if (byDomain.length > 1) {
+      candidates = byDomain.map((p) => p.id);
     }
-    if (ev.ai.confidence === "low") notes.push({ code: "ai-low-confidence", level: "warning", message: `Screenshot text was hard to read${ev.ai.notes ? `: ${ev.ai.notes}` : ""} — check title and times.` });
-    else if (ev.ai.notes) notes.push({ code: "info", level: "info", message: `AI note: ${ev.ai.notes}` });
-    if (candidates && projectId) candidates = undefined;
+  }
+  // 5. fuzzy suggestion — never applied automatically
+  if (!projectId && !candidates) {
+    const hit = bestFuzzy(cleanTitle(ev.title), projects, (p) => [p.client, ...p.aliases]);
+    if (hit) {
+      suggestion = { projectId: hit.item.id, reason: hit.reason };
+      notes.push({ code: "fuzzy-suggestion", level: "warning", message: `Possibly ${hit.item.client} (${hit.reason}) — confirm or choose another project.` });
+    }
   }
 
   let included = true;
@@ -213,6 +272,7 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
   if (ev.status === "tentative" && !ev.canceled) {
     notes.push({ code: "tentative", level: "warning", message: "Tentative — confirm you attended and for how long." });
   }
+  for (const pn of ev.parseNotes ?? []) notes.push({ code: pn.code, level: pn.code === "info" ? "info" : "warning", message: pn.message });
   if (ev.recurring) notes.push({ code: "recurring", level: "info", message: "Occurrence of a recurring series." });
   if (ev.crossesMidnight) notes.push({ code: "crosses-midnight", level: "warning", message: "Event runs past midnight; only the time on this date was counted." });
 
@@ -241,6 +301,8 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
     status: ev.status,
     notes,
     candidates,
+    suggestion,
+    domains: ev.domains,
     fingerprint: fingerprintOf(ev.date, ev.start, ev.end, ev.title),
   };
 }

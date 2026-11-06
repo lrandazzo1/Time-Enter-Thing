@@ -68,6 +68,7 @@ export function parseIcs(text: string, period: Period, timeZone: string, sourceL
       String(comp.getFirstPropertyValue("status") ?? "").toUpperCase() === "CANCELLED" ||
       /^\s*cancel+ed\s*:/i.test(title);
     if (canceled) status = "free";
+    const domains = emailDomains(comp);
 
     let ev: CalendarEvent;
     if (allDay) {
@@ -83,6 +84,7 @@ export function parseIcs(text: string, period: Period, timeZone: string, sourceL
         canceled,
         status,
         recurring,
+        domains,
         source: "ics",
         sourceLabel,
       };
@@ -115,6 +117,7 @@ export function parseIcs(text: string, period: Period, timeZone: string, sourceL
         status,
         recurring,
         crossesMidnight: crosses,
+        domains,
         source: "ics",
         sourceLabel,
       };
@@ -150,7 +153,32 @@ export function parseIcs(text: string, period: Period, timeZone: string, sourceL
   }
 
   out.sort((a, b) => (a.date + (a.start ?? "")).localeCompare(b.date + (b.start ?? "")));
+  dropOwnDomain(out);
   return { events: out, warnings };
+}
+
+const GENERIC_DOMAINS = new Set(["gmail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com", "me.com", "aol.com", "msn.com", "protonmail.com", "resource.calendar.google.com"]);
+
+function emailDomains(comp: ICALComponent): string[] {
+  const out = new Set<string>();
+  for (const name of ["organizer", "attendee"]) {
+    for (const prop of comp.getAllProperties(name)) {
+      const v = String(prop.getFirstValue() ?? "");
+      const m = /@([a-z0-9.-]+\.[a-z]{2,})/i.exec(v);
+      if (m && !GENERIC_DOMAINS.has(m[1].toLowerCase())) out.add(m[1].toLowerCase());
+    }
+  }
+  return [...out];
+}
+
+/** The user's own company domain appears on almost every meeting; drop it so it isn't used as a client hint. */
+function dropOwnDomain(events: CalendarEvent[]) {
+  const counts = new Map<string, number>();
+  const withDomains = events.filter((e) => e.domains?.length);
+  for (const e of withDomains) for (const d of e.domains!) counts.set(d, (counts.get(d) ?? 0) + 1);
+  const own = [...counts].filter(([, n]) => withDomains.length >= 3 && n / withDomains.length >= 0.6).map(([d]) => d);
+  if (!own.length) return;
+  for (const e of events) if (e.domains) e.domains = e.domains.filter((d) => !own.includes(d));
 }
 
 function wall(iso: string, hour: number, minute: number) {
