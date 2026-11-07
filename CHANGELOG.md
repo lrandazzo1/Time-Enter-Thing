@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.1 — Project names on the export preview
+
+### Changed
+- **Download CSV → Preview** now shows **Project Name** and **Project Code** as two adjacent columns (name first, wider; long names wrap instead of being cut off, and the table scrolls sideways on small screens). Names come from the saved project mappings, i.e. the `Project` column of the imported Projector Excel report. A project without a saved name shows **Unknown project**, highlighted, with a note explaining how to fix it — the code is never shown as the name.
+- **Review hours → Hours by project** shows the full project name with its code.
+- **The downloaded CSV is unchanged**: still `Description,Location,Project,Task,Work Date,Work Hours`, with only the project code in `Project`.
+
+### Fixed
+- Editing a project on the Projects page no longer drops its full name, location or roles; the full name can now be edited there too.
+
 ## 2.2.0 — Outlook Detailed agenda PDF is the only calendar import
 
 ### Removed

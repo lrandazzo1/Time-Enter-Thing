@@ -136,7 +136,7 @@ function ProjectRow({ p, all, onEdit, onDelete }: { p: ProjectMapping; all: Proj
           <div key={i} className={`small ${v.errors.includes(w) ? "text-error" : "text-warning"}`}>⚠ {w}</div>
         ))}
       </td>
-      <td data-label="Project code"><code>{p.code}</code></td>
+      <td data-label="Project code"><code>{p.code}</code>{p.fullName && <div className="muted small">{p.fullName}</div>}</td>
       <td data-label="Tasks">
         <div className="chips">
           {p.tasks.map((t) => (
@@ -163,8 +163,10 @@ function ProjectEditor({ value, all, onSave, onCancel }: { value: ProjectMapping
   const [tasks, setTasks] = useState(value.tasks.join("\n"));
   const [defaultTask, setDefaultTask] = useState(value.defaultTask);
   const [billable, setBillable] = useState(value.billable);
+  const [fullName, setFullName] = useState(value.fullName ?? "");
   const taskList = [...new Set(tasks.split(/\n|;/).map((t) => t.trim()).filter(Boolean))];
-  const draft: ProjectMapping = { id: value.id, client: client.trim(), aliases: aliases.split(/;|\n/).map((a) => a.trim()).filter(Boolean), code: code.trim(), tasks: taskList, defaultTask: taskList.includes(defaultTask) ? defaultTask : "", billable };
+  // Keep fields this form doesn't edit (location, roles, source) instead of dropping them.
+  const draft: ProjectMapping = { ...value, fullName: fullName.trim() || undefined, client: client.trim(), aliases: aliases.split(/;|\n/).map((a) => a.trim()).filter(Boolean), code: code.trim(), tasks: taskList, defaultTask: taskList.includes(defaultTask) ? defaultTask : "", billable };
   const v = validateProject(draft, all);
   const numbered = taskList.some((t) => stripTaskPrefix(t) !== t);
   return (
@@ -177,6 +179,10 @@ function ProjectEditor({ value, all, onSave, onCancel }: { value: ProjectMapping
         <label className="field">
           <span>BigTime project code</span>
           <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. P000123-001" />
+        </label>
+        <label className="field span-2">
+          <span>Full project name (as in Projector)</span>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Acme Components - Adaptive Planning - Implementation" />
         </label>
         <label className="field span-2">
           <span>Aliases (separate with ;)</span>

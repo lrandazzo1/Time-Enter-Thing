@@ -1,4 +1,4 @@
-# Test results — Timesheet Converter 2.2
+# Test results — Timesheet Converter 2.2.1
 
 Run on the final code in this ZIP (Node 22, Chromium via Playwright, production build).
 
@@ -6,8 +6,8 @@ Run on the final code in this ZIP (Node 22, Chromium via Playwright, production 
 
 | Suite | Result |
 |---|---|
-| Unit, PDF parser, Excel and OCR integration tests (Vitest) | **120 passed, 0 failed** (11 files; the two real-file tests are skipped unless local files are supplied) |
-| End-to-end browser workflow (synthetic PDF + Excel, returning user, privacy, accessibility, mobile) | **26/26 passed** |
+| Unit, PDF parser, Excel and OCR integration tests (Vitest) | **127 passed, 0 failed** (12 files; the two real-file tests are skipped unless local files are supplied) |
+| End-to-end browser workflow (synthetic PDF + Excel, returning user, privacy, accessibility, mobile) | **27/27 passed** |
 | Type check (`tsc --noEmit`) | **Passed** |
 | Production build (`npm run build`) | **Passed** — static pages only; no API routes, no environment variables |
 | Clean install of the ZIP contents with no AI variables (`npm ci`, `npm run build`, `npm test`) | **Passed** |
@@ -21,6 +21,7 @@ The attached Detailed agenda PDF was used only on the development machine, throu
 - Durations checked against the PDF, including a 110-minute meeting → `1.83` and 60-minute meetings → `1.00`.
 - Titles split across page breaks and long attendee lists/descriptions were read correctly; Teams links, meeting IDs, passcodes and phone numbers do not appear in extracted descriptions.
 - With the real Projector report, all of the matching examples from the specification behaved as required (prep meeting → its project; a two-client session → the named client and task; a “Company | Client: …” session → the client; an internal status meeting → the client proposed with a billable/internal choice). Nothing was assigned to the internal project just because the company name appeared. (Client names are deliberately left out of this file.)
+- Export preview: every project in the real report resolved to its full Projector name from the `Project` column (6 of 6), with the code alongside; the CSV still contains only codes.
 - In the browser the same PDF showed *Meetings found 21 · Canceled 4 · All-day 3*.
 
 ## End-to-end (`e2e/workflows.mjs`)
@@ -37,11 +38,12 @@ Synthetic, fictional data only (`tests/fixtures/pdf/agenda-week.pdf`, 6 pages).
 - ✓ excluded section lists canceled, all-day and personal items
 - ✓ all included meetings matched
 - ✓ overlap flagged with specific wording, nothing changed automatically
+- ✓ export preview: Project Name left of Project Code, names from the Excel report — Acme Components - Adaptive Planning - Implementation / P001234-001 · name 332px > code 136px
 - ✓ CSV: exact six columns, codes, tasks, locations, decimal hours — BigTime_Timesheet_2026-11-01_to_2026-11-07.csv
 - ✓ CSV filename uses the PDF's date range — BigTime_Timesheet_2026-11-01_to_2026-11-07.csv
-- ✓ setup success state — first-time run 4.362s (automated)
+- ✓ setup success state — first-time run 4.794s (automated)
 - ✓ remembered match reused (TFAG not asked again) — 3 group(s) left
-- ✓ returning user: same CSV (ANSI encoding) — 2.018s (automated)
+- ✓ returning user: same CSV (ANSI encoding) — 2.202s (automated)
 - ✓ no requests to other hosts and no uploads — 26 same-origin GET requests
 - ✓ pdf.js worker served from this site
 - ✓ CSP restricts connections to this site
@@ -68,25 +70,6 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 ```
 
 ## Unit and integration tests
-
-**tests/time.test.ts** (16)
-
-- ✓ decimal hours > 15 minutes -> 0.25
-- ✓ decimal hours > 30 minutes -> 0.50
-- ✓ decimal hours > 45 minutes -> 0.75
-- ✓ decimal hours > 60 minutes -> 1.00
-- ✓ decimal hours > 90 minutes -> 1.50
-- ✓ decimal hours > 135 minutes -> 2.25
-- ✓ decimal hours > 180 minutes -> 3.00
-- ✓ decimal hours > 210 minutes -> 3.50
-- ✓ decimal hours > 225 minutes -> 3.75
-- ✓ decimal hours > 480 minutes -> 8.00
-- ✓ decimal hours > 110 minutes -> 1.83
-- ✓ decimal hours > 100 minutes -> 1.67
-- ✓ decimal hours > 5 minutes -> 0.08
-- ✓ decimal hours > never produces H:MM
-- ✓ decimal hours > parses user input
-- ✓ time zones > round-trips across DST
 
 **tests/excel.test.ts** (19)
 
@@ -125,16 +108,34 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ project configuration > remembers confirmed matches by title
 - ✓ regression: Nov 2–6 week (synthetic replica) > produces the same rows, hours and totals as the imported file
 
-**tests/matching.test.ts** (8)
+**tests/time.test.ts** (16)
 
-- ✓ matching > uses the CLIENT | TASK | DESCRIPTION convention
-- ✓ matching > flags unknown tasks instead of guessing
-- ✓ matching > uses single/default tasks and keyword aliases
-- ✓ matching > flags ambiguity across clients
-- ✓ matching > does not match partial words
-- ✓ matching > excludes cancelled, all-day, keyword and free events
-- ✓ matching > strips numeric prefixes
-- ✓ pipe titles that are not the convention > uses the only task when the second segment is not a task
+- ✓ decimal hours > 15 minutes -> 0.25
+- ✓ decimal hours > 30 minutes -> 0.50
+- ✓ decimal hours > 45 minutes -> 0.75
+- ✓ decimal hours > 60 minutes -> 1.00
+- ✓ decimal hours > 90 minutes -> 1.50
+- ✓ decimal hours > 135 minutes -> 2.25
+- ✓ decimal hours > 180 minutes -> 3.00
+- ✓ decimal hours > 210 minutes -> 3.50
+- ✓ decimal hours > 225 minutes -> 3.75
+- ✓ decimal hours > 480 minutes -> 8.00
+- ✓ decimal hours > 110 minutes -> 1.83
+- ✓ decimal hours > 100 minutes -> 1.67
+- ✓ decimal hours > 5 minutes -> 0.08
+- ✓ decimal hours > never produces H:MM
+- ✓ decimal hours > parses user input
+- ✓ time zones > round-trips across DST
+
+**tests/preview.test.ts** (7)
+
+- ✓ export preview: project name + code (from the imported Projector Excel report) > shows Project Name immediately left of Project Code, names taken from the report's Project column
+- ✓ export preview: project name + code (from the imported Projector Excel report) > preview rows are the CSV rows with only the name column inserted
+- ✓ export preview: project name + code (from the imported Projector Excel report) > the downloaded CSV is unchanged: six columns, project code only
+- ✓ export preview: project name + code (from the imported Projector Excel report) > missing names show “Unknown project”, are flagged, and are never replaced by the code or client
+- ✓ export preview: project name + code (from the imported Projector Excel report) > an unnamed duplicate mapping resolves the name from another saved mapping with the same code
+- ✓ export preview: project name + code (from the imported Projector Excel report) > name survives a browser refresh and a restored configuration > localStorage save → load (refresh)
+- ✓ export preview: project name + code (from the imported Projector Excel report) > name survives a browser refresh and a restored configuration > backup download → restore, and projects CSV export → import
 
 **tests/pdf.test.ts** (30)
 
@@ -179,6 +180,17 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ validation > detects duplicates by fingerprint
 - ✓ merge > combines same date/project/task
 
+**tests/matching.test.ts** (8)
+
+- ✓ matching > uses the CLIENT | TASK | DESCRIPTION convention
+- ✓ matching > flags unknown tasks instead of guessing
+- ✓ matching > uses single/default tasks and keyword aliases
+- ✓ matching > flags ambiguity across clients
+- ✓ matching > does not match partial words
+- ✓ matching > excludes cancelled, all-day, keyword and free events
+- ✓ matching > strips numeric prefixes
+- ✓ pipe titles that are not the convention > uses the only task when the second segment is not a task
+
 **tests/projector.test.ts** (19)
 
 - ✓ project codes > validates the Projector format and keeps leading zeros
@@ -209,16 +221,16 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ BigTime CSV > names the file by period
 - ✓ BigTime CSV > encodes ANSI (Windows-1252)
 
-**tests/excel.private.test.ts** (1)
-
-- skipped: real Projector report (local only) > parses the report
-
 **tests/ocr.integration.test.ts** (4)
 
 - ✓ OCR → Projector parser (real images) > reads a full project list
 - ✓ OCR → Projector parser (real images) > reads a dark-mode screenshot (after inversion the same data is found)
 - ✓ OCR → Projector parser (real images) > combines a multi-screenshot batch: continuation, overlap and merging
 - ✓ OCR limits (real images) > a small, blurry, compressed screenshot never yields a wrong 'valid' code
+
+**tests/excel.private.test.ts** (1)
+
+- skipped: real Projector report (local only) > parses the report
 
 **tests/pdf.private.test.ts** (1)
 

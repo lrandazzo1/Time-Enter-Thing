@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "./store";
 import { Badge, Button, Card, Notice, downloadBytes } from "./ui";
 import { validate } from "@/lib/review";
-import { EXPORTERS, buildCsv, getExporter } from "@/lib/exporters";
+import { EXPORTERS, buildCsv, buildPreview, getExporter } from "@/lib/exporters";
 import { encodeCsv, type CsvEncoding } from "@/lib/exporters/csv";
 import { reviewSummaryMarkdown } from "@/lib/summary";
 import { formatDecimalHours, toUSDate } from "@/lib/time";
@@ -23,6 +23,8 @@ export function ExportStep({ onBack, onGuide, onExported }: { onBack: () => void
   const warnings = issues.filter((i) => i.level === "warning");
   const csv = useMemo(() => buildCsv(exporter, entries, ctx), [exporter, entries, projects, settings, period]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = exporter.rows(entries, ctx);
+  const preview = useMemo(() => buildPreview(exporter, entries, ctx), [exporter, entries, projects, settings, period]); // eslint-disable-line react-hooks/exhaustive-deps
+  const unknownRows = new Set(preview.unknownRows);
   const encoded = useMemo(() => encodeCsv(csv, encoding), [csv, encoding]);
   const fileName = exporter.fileName(period);
   const total = entries.filter((e) => e.included).reduce((a, e) => a + e.minutes, 0);
@@ -90,27 +92,40 @@ export function ExportStep({ onBack, onGuide, onExported }: { onBack: () => void
         </details>
       )}
 
-      <Card title="Preview" subtitle={<>File name: <code>{fileName}</code></>}>
+      <Card title="Preview" subtitle={<>File name: <code>{fileName}</code>{preview.nameColumn !== undefined && <> · Project names are shown here for checking only — the CSV&apos;s <code>Project</code> column contains just the project code.</>}</>}>
+        {preview.unknownRows.length > 0 && (
+          <Notice tone="warning" title={`Project name not found for ${preview.unknownRows.length} row${preview.unknownRows.length === 1 ? "" : "s"}`}>
+            {preview.unknownProjects.length > 0 ? (
+              <>
+                No full project name is saved for {preview.unknownProjects.map((u, i) => <span key={u.projectId}>{i > 0 && ", "}<code>{u.code || "(no code)"}</code>{u.client ? ` (${u.client})` : ""}</span>)}. Check that the code is right, then re-import your Projector Excel report or add the full name under <strong>Projects → Edit</strong>. The CSV still uses the project code.
+              </>
+            ) : (
+              <>Some rows have no project assigned. Go back to Review and choose a project.</>
+            )}
+          </Notice>
+        )}
         <div className="table-wrap">
           <table className="preview-table">
             <thead>
               <tr>
-                {exporter.columns.map((c) => (
-                  <th key={c}>{c}</th>
+                {preview.columns.map((c, j) => (
+                  <th key={c} className={j === preview.nameColumn ? "col-pname" : j === (preview.nameColumn ?? -9) + 1 ? "col-pcode" : undefined}>{c}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={i}>
+              {preview.rows.map((r, i) => (
+                <tr key={i} className={unknownRows.has(i) ? "row-flag" : undefined}>
                   {r.map((c, j) => (
-                    <td key={j} className={j === r.length - 1 ? "num" : ""}>{c}</td>
+                    <td key={j} className={j === r.length - 1 ? "num" : j === preview.nameColumn ? "col-pname" : j === (preview.nameColumn ?? -9) + 1 ? "col-pcode" : ""}>
+                      {j === preview.nameColumn && unknownRows.has(i) ? <Badge tone="warning">{c}</Badge> : c}
+                    </td>
                   ))}
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {preview.rows.length === 0 && (
                 <tr>
-                  <td colSpan={exporter.columns.length} className="muted">No included entries.</td>
+                  <td colSpan={preview.columns.length} className="muted">No included entries.</td>
                 </tr>
               )}
             </tbody>

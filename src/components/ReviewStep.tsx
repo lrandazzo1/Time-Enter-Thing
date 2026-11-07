@@ -8,6 +8,7 @@ import { dailyTotals, findDuplicates, findOverlaps, keepOneInOverlap, mergeEntri
 import { formatDecimalHours, intervalMinutes, isValidHHMM, listDates, parseHoursInput, prettyDate } from "@/lib/time";
 import { upsertRules } from "./MatchStep";
 import { uid } from "@/lib/uid";
+import { resolveProjectName } from "@/lib/projectName";
 
 const MANUAL_MATCH_CODES = ["no-project", "ambiguous-project", "task-unclear", "convention-task-unmatched", "fuzzy-suggestion", "domain-match"];
 
@@ -41,6 +42,12 @@ export const liveNotes = (e: TimeEntry): ImportNote[] => e.notes.filter((n) => !
 
 export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const { entries, setEntries, projects, settings, setSettings, period, rules, setRules } = useStore();
+  /** "Full Projector name (CODE)" when the name is known; otherwise the client + code label. */
+  const projectLabel = (projectId: string | null, fallback: string) => {
+    const p = projectId ? projects.find((x) => x.id === projectId) : undefined;
+    const name = resolveProjectName(p, projects);
+    return p && name ? `${name} (${p.code})` : fallback;
+  };
   const [filter, setFilter] = useState<Filter>("all");
   const [flash, setFlash] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -255,7 +262,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
           <ul className="by-project">
             {t.byProject.map((p) => (
               <li key={p.label}>
-                <span>{p.label}</span>
+                <span>{projectLabel(p.projectId, p.label)}</span>
                 {p.billable === false && <Badge>internal</Badge>}
                 {p.billable === null && <Badge tone="error">unassigned</Badge>}
                 <span className="num">{formatDecimalHours(p.minutes)}</span>
