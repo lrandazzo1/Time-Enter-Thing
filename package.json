@@ -1,22 +1,22 @@
 {
   "name": "timesheet-converter",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/copy-ocr-assets.mjs && next dev",
-    "prebuild": "node scripts/copy-ocr-assets.mjs",
+    "dev": "node scripts/copy-assets.mjs && next dev",
+    "prebuild": "node scripts/copy-assets.mjs",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "make-fixtures": "node scripts/make-fixtures.mjs",
+    "make-fixtures": "node scripts/make-fixtures.mjs && node scripts/make-pdf-fixtures.mjs",
     "e2e": "node e2e/workflows.mjs http://localhost:3000"
   },
   "dependencies": {
     "@tesseract.js-data/eng": "1.0.0",
-    "ical.js": "^2.2.1",
     "next": "^16.4.5",
     "papaparse": "^5.5.3",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "read-excel-file": "9.3.12",

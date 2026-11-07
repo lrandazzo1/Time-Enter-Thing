@@ -385,3 +385,42 @@ kbd { font-family: var(--mono); font-size: 0.8em; border: 1px solid var(--border
   .review-table .col-status { display: flex !important; gap: 8px; align-items: center; flex-wrap: wrap; }
   .row-actions { flex-direction: row; justify-content: flex-end; }
 }
+
+/* ---------------- PDF calendar import ---------------- */
+.upload-card { padding: 28px; }
+.upload-title { font-size: 1.35rem; margin: 0 0 4px; }
+.upload-card .dropzone { padding: 44px 16px; margin-top: 14px; }
+.stepper.five { grid-template-columns: repeat(5, 1fr); }
+.stepper.five .step button { padding: 9px 10px; gap: 8px; }
+.stepper.five .step-label { font-size: 0.88rem; line-height: 1.2; }
+.stepper.five .step-meta { display: none; }
+.stat-value.small-value { font-size: 1.05rem; padding: 6px 0; }
+.nowrap { white-space: nowrap; }
+.extract-table td, .extract-table th { font-size: 0.9rem; }
+details.source { margin-top: 4px; font-size: 0.78rem; }
+details.source summary { cursor: pointer; color: var(--muted); }
+details.source pre { white-space: pre-wrap; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 4px 0 0; max-width: 520px; }
+.stack-xs { display: flex; flex-direction: column; gap: 4px; }
+@media (min-width: 721px) {
+  .review-table { table-layout: fixed; width: 100%; min-width: 1580px; }
+  .review-table .col-date { width: 150px; }
+  .review-table .col-clock { width: 146px; }
+  .review-table .col-proj { width: 220px; }
+  .review-table .col-task { width: 180px; }
+  .review-table .col-hours { width: 80px; }
+  .review-table .col-loc { width: 150px; }
+  .review-table td input, .review-table td select { width: 100%; min-width: 0; }
+}
+.clock-input { font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) {
+  .stepper.five { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 720px) {
+  .stepper.five { grid-template-columns: 1fr; }
+  .review-table { min-width: 0; }
+  .extract-table thead { display: none; }
+  .extract-table, .extract-table tbody, .extract-table tr, .extract-table td { display: block; width: 100%; }
+  .extract-table tr { border-bottom: 1px solid var(--border-strong); padding: 6px 0; }
+  .extract-table td { border: 0; padding: 3px 12px; text-align: left !important; }
+  .extract-table td[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; font-weight: 650; text-transform: uppercase; color: var(--muted); }
+}

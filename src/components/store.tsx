@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { MatchRule, Period, ProjectMapping, Settings, TimeEntry } from "@/lib/types";
+import type { ImportSummary } from "./ImportStep";
 import { clearDraft, defaultPeriod, defaultSettings, loadDraft, loadProjects, loadRules, loadSettings, saveDraft, saveProjects, saveRules, saveSettings } from "@/lib/storage";
 
 interface Store {
@@ -16,6 +17,8 @@ interface Store {
   setEntries: (e: TimeEntry[] | ((prev: TimeEntry[]) => TimeEntry[])) => void;
   period: Period;
   setPeriod: (p: Period) => void;
+  lastImport: ImportSummary | null;
+  setLastImport: (s: ImportSummary | null) => void;
   resetDraft: () => void;
 }
 
@@ -28,6 +31,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(() => defaultSettings());
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [rules, setRules] = useState<MatchRule[]>([]);
+  const [lastImport, setLastImport] = useState<ImportSummary | null>(null);
   const [period, setPeriod] = useState<Period>(() => defaultPeriod(defaultSettings().timeZone));
 
   useEffect(() => {
@@ -39,6 +43,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (d) {
       setEntries(d.entries ?? []);
       if (d.period) setPeriod(d.period);
+      if (d.lastImport) setLastImport(d.lastImport as ImportSummary);
     } else setPeriod(defaultPeriod(s.timeZone));
     try {
       window.localStorage.setItem("tsc.v1.probe", "1");
@@ -61,18 +66,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (ready) saveRules(rules);
   }, [ready, rules]);
   useEffect(() => {
-    if (ready) saveDraft({ entries, period, savedAt: new Date().toISOString() });
-  }, [ready, entries, period]);
+    if (ready) saveDraft({ entries, period, lastImport, savedAt: new Date().toISOString() });
+  }, [ready, entries, period, lastImport]);
 
   const resetDraft = useCallback(() => {
     clearDraft();
     setEntries([]);
+    setLastImport(null);
     setPeriod(defaultPeriod(settings.timeZone));
   }, [settings.timeZone]);
 
   const value = useMemo<Store>(
-    () => ({ ready, storageOk, projects, setProjects, settings, setSettings, rules, setRules, entries, setEntries, period, setPeriod, resetDraft }),
-    [ready, storageOk, projects, settings, rules, entries, period, resetDraft],
+    () => ({ ready, storageOk, projects, setProjects, settings, setSettings, rules, setRules, entries, setEntries, period, setPeriod, lastImport, setLastImport, resetDraft }),
+    [ready, storageOk, projects, settings, rules, entries, period, lastImport, resetDraft],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

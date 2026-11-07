@@ -1,98 +1,116 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "./store";
-import { Badge, Button, Card, Dropzone, Notice, readText } from "./ui";
-import type { CalendarEvent, TimeEntry } from "@/lib/types";
-import { parseIcs } from "@/lib/parsers/ics";
-import { parseCalendarCsv } from "@/lib/parsers/csv";
-import { eventToEntry, fingerprintOf } from "@/lib/matching";
-import { addDays, formatDecimalHours, intervalMinutes, isValidHHMM, mondayOf, parseHoursInput, prettyDate, todayIn } from "@/lib/time";
-import { ocrImages, type OcrProgress } from "@/lib/ocr/ocr";
-import { calendarEventsFromOcr } from "@/lib/parsers/calendarOcr";
-import { parsePastedEvents } from "@/lib/parsers/paste";
+import { Badge, Button, Card, Dropzone, Notice } from "./ui";
+import type { TimeEntry } from "@/lib/types";
+import { eventToEntry } from "@/lib/matching";
+import { formatDecimalHours, intervalMinutes, isValidHHMM, parseHoursInput, prettyDate, toUSDate } from "@/lib/time";
+import { AgendaError, parseAgenda } from "@/lib/pdf/agenda";
+import { extractPdfText } from "@/lib/pdf/extract";
 import { uid } from "@/lib/uid";
 
-type Mode = "file" | "paste" | "manual" | "screenshot";
-
-interface ImportSummary {
-  added: number;
-  excluded: number;
-  review: number;
-  duplicates: number;
+export interface ImportSummary {
+  fileName: string;
+  pages: number;
+  meetings: number;
+  timed: number;
+  canceled: number;
+  allDay: number;
+  duplicatesRemoved: { title: string; date: string; start: string | null }[];
   warnings: string[];
-  sourceLabel: string;
+  period: { start: string; end: string } | null;
+  importedAt: string;
 }
 
+/** Step 1 — the only calendar input: Outlook's "Detailed agenda" printed to PDF, read in this browser. */
 export function ImportStep({ onDone }: { onDone: () => void }) {
-  const { period, setPeriod, settings, projects, entries, setEntries, rules } = useStore();
-  const [mode, setMode] = useState<Mode>("file");
-  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const { period, setPeriod, settings, projects, entries, setEntries, rules, lastImport, setLastImport } = useStore();
   const [error, setError] = useState<string | null>(null);
-  const [replace, setReplace] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [replace, setReplace] = useState(true);
 
-  const today = todayIn(settings.timeZone);
-  const thisMonday = mondayOf(today);
-
-  function addEvents(events: CalendarEvent[], warnings: string[], sourceLabel: string) {
-    const base = replace ? [] : entries;
-    const known = new Set(base.filter((e) => e.included && e.fingerprint).map((e) => e.fingerprint!));
-    let duplicates = 0;
-    const fresh: TimeEntry[] = events.map((ev) => {
-      const entry = eventToEntry(ev, projects, settings, rules);
-      if (entry.fingerprint && entry.included && known.has(entry.fingerprint)) {
-        duplicates++;
-        return { ...entry, included: false, excludeReason: "Duplicate of an event already imported", notes: [...entry.notes, { code: "duplicate", level: "info", message: "Same title and time as an entry already in this timesheet — excluded." }] };
-      }
-      if (entry.fingerprint && entry.included) known.add(entry.fingerprint);
-      return entry;
-    });
-    setEntries([...base, ...fresh]);
-    const included = fresh.filter((e) => e.included);
-    setSummary({
-      added: fresh.length,
-      excluded: fresh.length - included.length,
-      review: included.filter((e) => !e.projectId || !e.task || e.notes.some((n) => n.level === "warning")).length,
-      duplicates,
-      warnings,
-      sourceLabel,
-    });
-    setReplace(false);
-  }
-
-  async function onCalendarFiles(files: File[]) {
+  async function onFiles(files: File[]) {
     setError(null);
-    setSummary(null);
-    const allEvents: CalendarEvent[] = [];
-    const warnings: string[] = [];
+    const f = files[0];
+    if (!f) return;
+    if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") {
+      setError("Please upload the PDF from Outlook (Print → Detailed agenda → Save as PDF). Other calendar files and images aren't supported.");
+      return;
+    }
+    if (f.size > 40 * 1024 * 1024) {
+      setError("That PDF is larger than 40 MB. Print a shorter date range (one week is ideal).");
+      return;
+    }
+    setBusy("Reading PDF on this device…");
     try {
-      for (const file of files) {
-        const text = await readText(file);
-        const isIcs = /\.(ics|ical|ifb|icalendar)$/i.test(file.name) || /BEGIN:VCALENDAR/i.test(text.slice(0, 2000));
-        if (isIcs) {
-          const r = parseIcs(text, period, settings.timeZone, file.name);
-          allEvents.push(...r.events);
-          warnings.push(...r.warnings);
-        } else if (/\.(csv|txt)$/i.test(file.name) || text.includes(",")) {
-          const r = parseCalendarCsv(text, period, settings, file.name);
-          allEvents.push(...r.events);
-          warnings.push(...r.warnings);
-        } else {
-          throw new Error(`${file.name}: unsupported file. Use an Outlook .ics or .csv export.`);
+      const pages = await extractPdfText(f, (p, n) => setBusy(`Reading page ${p} of ${n}…`));
+      const r = parseAgenda(pages, { dateOrder: settings.csvDateOrder });
+      const newPeriod = r.period ?? period;
+      if (r.period) setPeriod(r.period);
+      const base = replace ? [] : entries;
+      const known = new Set(base.filter((e) => e.included && e.fingerprint).map((e) => e.fingerprint!));
+      const fresh: TimeEntry[] = r.events.map((ev) => {
+        const e = eventToEntry(ev, projects, settings, rules);
+        if (e.fingerprint && e.included && known.has(e.fingerprint)) {
+          return { ...e, included: false, excludeReason: "Already in this timesheet", notes: [...e.notes, { code: "duplicate", level: "info", message: "Same meeting as an entry already in this timesheet — excluded." }] };
         }
-      }
-      if (allEvents.length === 0) {
-        setError(`No events found between ${prettyDate(period.start)} and ${prettyDate(period.end)}. Check the timesheet period above, or export a calendar range that covers it.`);
-        return;
-      }
-      addEvents(allEvents, warnings, files.map((f) => f.name).join(", "));
+        return e;
+      });
+      setEntries([...base, ...fresh]);
+      setLastImport({
+        fileName: f.name,
+        pages: r.pages,
+        meetings: r.events.length,
+        timed: r.events.filter((e) => !e.allDay).length,
+        canceled: r.events.filter((e) => e.canceled).length,
+        allDay: r.events.filter((e) => e.allDay).length,
+        duplicatesRemoved: r.duplicatesRemoved,
+        warnings: [...r.warnings, ...(newPeriod && r.events.some((e) => e.date < newPeriod.start || e.date > newPeriod.end) ? ["Some meetings fall outside the printed date range."] : [])],
+        period: r.period,
+        importedAt: new Date().toISOString(),
+      });
+      setReplace(true);
+      onDone();
     } catch (e) {
-      setError((e as Error).message);
+      setError(e instanceof AgendaError ? e.message : `Couldn't read this PDF: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
     }
   }
 
   return (
     <div className="stack">
-      <Card title="Timesheet period" subtitle={`Events outside this range are ignored. Times are shown in ${settings.timeZone} (change on the Projects & Tasks tab).`}>
+      {projects.length === 0 && (
+        <Notice tone="info" title="No projects saved yet">
+          You can import your calendar now and add projects while matching, or first upload your Projector Excel report on the <strong>Projects</strong> page.
+        </Notice>
+      )}
+      <Card className="upload-card">
+        <h2 className="upload-title">Upload Your Outlook Calendar PDF</h2>
+        <p className="muted">Export your calendar from Outlook using <strong>Print → Detailed agenda → Save as PDF</strong>.</p>
+        <Dropzone accept=".pdf,application/pdf" onFiles={onFiles} label={busy ?? <><strong>Drop your calendar PDF here</strong> or click to choose</>} hint="Read in this browser only — the PDF is never uploaded. One week per PDF works best." icon="📄" />
+        {entries.length > 0 && (
+          <label className="check mt">
+            <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+            <span>Replace the {entries.length} entries currently in this timesheet (untick to add to them)</span>
+          </label>
+        )}
+        {error && <div className="mt"><Notice tone="error" title="Couldn't use this PDF">{error}</Notice></div>}
+        {lastImport && !busy && !error && (
+          <p className="small muted mt">Last import: {lastImport.fileName} · {lastImport.meetings} meetings · {lastImport.period ? `${toUSDate(lastImport.period.start)} – ${toUSDate(lastImport.period.end)}` : ""} · <button className="link" onClick={onDone}>review →</button></p>
+        )}
+        <details className="help">
+          <summary>How do I make this PDF?</summary>
+          <ol className="tight small">
+            <li>In Outlook, open <strong>Calendar</strong> and go to the week you want.</li>
+            <li>Choose <strong>Print</strong> (File → Print, or Home → Print in new Outlook).</li>
+            <li>Set the date range (e.g. Monday–Sunday) and choose the <strong>Detailed agenda</strong> style.</li>
+            <li>Printer: <strong>Microsoft Print to PDF</strong> or <strong>Save as PDF</strong>. Save the file, then drop it here.</li>
+          </ol>
+          <p className="small">Don&apos;t use the normal day/week/month calendar print — it cuts off titles and doesn&apos;t list exact times.</p>
+        </details>
+      </Card>
+      <Card title="Timesheet period" subtitle="Set automatically from the PDF's printed date range. Change it only if you need to.">
         <div className="row wrap gap">
           <label className="field">
             <span>From</span>
@@ -102,169 +120,10 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
             <span>To</span>
             <input type="date" value={period.end} min={period.start} onChange={(e) => e.target.value && setPeriod({ ...period, end: e.target.value })} />
           </label>
-          <div className="row gap-sm align-end">
-            <Button size="sm" onClick={() => setPeriod({ start: thisMonday, end: addDays(thisMonday, 6) })}>This week</Button>
-            <Button size="sm" onClick={() => setPeriod({ start: addDays(thisMonday, -7), end: addDays(thisMonday, -1) })}>Last week</Button>
-          </div>
         </div>
+        <p className="small muted mt">No meetings this week? Skip ahead to <button className="link" onClick={onDone}>Review</button> and add your work manually.</p>
       </Card>
-
-      {projects.length === 0 && (
-        <Notice tone="info" title="No projects saved yet">
-          You can import your calendar now and add projects as you match each meeting, or first upload your Projector Excel report on the <strong>Projects</strong> page.
-        </Notice>
-      )}
-
-      <div className="method-grid four" role="tablist" aria-label="Import method">
-        {(
-          [
-            ["file", "📅", "Upload Outlook .ics / .csv", "Recommended · exact times"],
-            ["paste", "📋", "Paste event information", "Copied from Outlook or a list"],
-            ["manual", "✍️", "Enter work manually", "Time that isn't on your calendar"],
-            ["screenshot", "🖼️", "Calendar screenshot", "Beta · times must be verified"],
-          ] as const
-        ).map(([id, icon, label, sub]) => (
-          <button key={id} role="tab" aria-selected={mode === id} className={`method ${mode === id ? "is-active" : ""}`} onClick={() => setMode(id)}>
-            <span className="method-icon" aria-hidden>{icon}</span>
-            <span className="method-title">{label}</span>
-            <span className="method-sub">{sub}</span>
-          </button>
-        ))}
-      </div>
-
-      {entries.length > 0 && mode !== "manual" && (
-        <label className="check">
-          <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
-          <span>Replace the {entries.length} entries already in this timesheet (otherwise new events are added)</span>
-        </label>
-      )}
-
-      {mode === "file" && (
-        <Card title="Import your Outlook calendar" subtitle="Your file is read in this browser only — it is not uploaded anywhere.">
-          <Dropzone accept=".ics,.ical,.csv,text/calendar,text/csv" multiple onFiles={onCalendarFiles} label={<><strong>Drop .ics or .csv files here</strong> or click to choose</>} hint="Outlook: File → Save Calendar (.ics) or File → Open & Export → Import/Export → Export to a file → CSV. See the Setup Guide for Outlook on the web and Mac." icon="📅" />
-          <details className="help">
-            <summary>Tip: name your work blocks so they match automatically</summary>
-            <p>
-              Use <code>CLIENT | TASK | WORK DESCRIPTION</code>, e.g. <code>Acme Corp | Planning | Model development</code>. Blocks named this way are matched exactly; other meetings are matched by the client names and aliases you configure and flagged when unclear.
-            </p>
-          </details>
-        </Card>
-      )}
-
-      {mode === "screenshot" && <ScreenshotImport onEvents={addEvents} onError={setError} />}
-      {mode === "paste" && <PasteEvents onEvents={addEvents} onError={setError} />}
-      {mode === "manual" && <ManualEntry />}
-
-      {error && <Notice tone="error" title="Import problem">{error}</Notice>}
-      {summary && (
-        <Notice tone={summary.review > 0 ? "warning" : "success"} title={`Imported ${summary.added} event${summary.added === 1 ? "" : "s"} from ${summary.sourceLabel}`}>
-          <p>
-            {summary.added - summary.excluded} proposed as work time · {summary.excluded} excluded (canceled, all-day, free, personal{summary.duplicates ? `, ${summary.duplicates} duplicates` : ""}) · {summary.review} need your review.
-          </p>
-          {summary.warnings.length > 0 && (
-            <ul className="tight">
-              {summary.warnings.slice(0, 8).map((w, i) => (
-                <li key={i}>{w}</li>
-              ))}
-            </ul>
-          )}
-          <div className="row gap-sm mt">
-            <Button variant="primary" onClick={onDone}>Match work →</Button>
-          </div>
-        </Notice>
-      )}
     </div>
-  );
-}
-
-function PasteEvents({ onEvents, onError }: { onEvents: (ev: CalendarEvent[], w: string[], label: string) => void; onError: (e: string | null) => void }) {
-  const { period, settings } = useStore();
-  const [text, setText] = useState("");
-  return (
-    <Card title="Paste event information" subtitle="Paste rows copied from Outlook's list view (with a header row), or lines like “11/03/2026 9:00 AM - 10:30 AM Acme | Planning | Model build”. Day headings such as “Tuesday, November 3” apply to the lines below them.">
-      <textarea className="paste-area" rows={9} value={text} onChange={(e) => setText(e.target.value)} aria-label="Pasted events" spellCheck={false} placeholder={"Monday, November 2, 2026\n9:00 AM - 12:30 PM Acme Corp | Planning | Model build\n1:00 PM - 2:15 PM Globex sync"} />
-      <div className="row gap-sm mt">
-        <Button variant="primary" disabled={!text.trim()} onClick={() => {
-          onError(null);
-          try {
-            const r = parsePastedEvents(text, period, settings);
-            if (!r.events.length) {
-              onError("No events with a recognisable title were found. Include a time range (e.g. 9:00 AM - 10:00 AM) and a date or day heading.");
-              return;
-            }
-            onEvents(r.events, r.warnings, "pasted text");
-            setText("");
-          } catch (e) {
-            onError((e as Error).message);
-          }
-        }}>Detect events</Button>
-      </div>
-      <p className="muted small mt">Lines without a visible time range are added with no hours — you enter them. Nothing is guessed.</p>
-    </Card>
-  );
-}
-
-function ScreenshotImport({ onEvents, onError }: { onEvents: (ev: CalendarEvent[], w: string[], label: string) => void; onError: (e: string | null) => void }) {
-  const { period, settings } = useStore();
-  const [files, setFiles] = useState<File[]>([]);
-  const [progress, setProgress] = useState<OcrProgress | null>(null);
-  const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
-  useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
-
-  async function run() {
-    onError(null);
-    try {
-      const pages = await ocrImages(files, { mode: "calendar", onProgress: setProgress });
-      const r = calendarEventsFromOcr(pages, period, settings);
-      const seen = new Set<string>();
-      const unique = r.events.filter((e) => {
-        const k = fingerprintOf(e.date, e.start, e.end, e.title);
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-      if (!unique.length) {
-        onError("No events could be read. Calendar screenshots are hard to read reliably — an .ics/.csv export or pasted text works much better.");
-        return;
-      }
-      onEvents(unique, r.warnings, `${files.length} screenshot${files.length > 1 ? "s" : ""}`);
-      setFiles([]);
-    } catch (e) {
-      onError(`Text recognition failed: ${(e as Error).message}`);
-    } finally {
-      setProgress(null);
-    }
-  }
-
-  return (
-    <Card title="Calendar screenshot (beta)" subtitle="Read locally on this device. Use this only when you can't export or copy your calendar.">
-      <Notice tone="warning" title="Screenshots give approximate results">
-        Only text that is visible is used. Event blocks rarely show their exact times, so most events arrive <strong>without hours</strong> and every date and time must be checked. Calendar files are far more accurate.
-      </Notice>
-      <div className="mt">
-        <Dropzone accept="image/png,image/jpeg,image/webp" multiple onFiles={(f) => setFiles((prev) => [...prev, ...f.filter((x) => x.type.startsWith("image/"))].slice(0, 10))} label={<><strong>Drop calendar screenshots</strong> or click to choose</>} hint="Work-week view with day headers visible works best." icon="🖼️" />
-      </div>
-      {files.length > 0 && (
-        <ul className="thumbs">
-          {files.map((f, i) => (
-            <li key={i} className="thumb">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={previews[i]} alt={`Screenshot ${i + 1}`} />
-              <span className="thumb-name">{f.name}</span>
-              <button className="thumb-remove" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {progress ? (
-        <div className="progress-box" role="status" aria-live="polite">
-          <div className="small">Screenshot {progress.index + 1} of {progress.total}: {progress.status}</div>
-          <div className="progress"><span style={{ width: `${((progress.index + progress.progress) / progress.total) * 100}%` }} /></div>
-        </div>
-      ) : (
-        <Button variant="primary" className="mt" disabled={!files.length} onClick={run}>Read {files.length || ""} screenshot{files.length === 1 ? "" : "s"}</Button>
-      )}
-    </Card>
   );
 }
 

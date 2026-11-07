@@ -76,7 +76,7 @@ describe("OCR → Projector parser (real images)", () => {
   }, 120_000);
 });
 
-describe("OCR limits and calendar screenshots (real images)", () => {
+describe("OCR limits (real images)", () => {
   it("a small, blurry, compressed screenshot never yields a wrong 'valid' code", async () => {
     const r = parseProjectorPages([await ocr("projector-list-1-degraded.png")]);
     const truth = new Set(["P001234-001", "P005678-001", "P002468-002", "P000999-001"]);
@@ -87,27 +87,4 @@ describe("OCR limits and calendar screenshots (real images)", () => {
     }
   }, 60_000);
 
-  it("reads visible titles/times from an Outlook-style week view; no times are invented", async () => {
-    const { calendarEventsFromOcr } = await import("@/lib/parsers/calendarOcr");
-    await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
-    const png = PNG.sync.read(readFileSync("tests/fixtures/calendar-week.png"));
-    const scale = chooseScale(png.width, png.height);
-    const e = enhance({ data: png.data, width: png.width, height: png.height }, scale);
-    const out = new PNG({ width: e.width, height: e.height });
-    out.data = Buffer.from(e.data);
-    const { data } = await worker.recognize(PNG.sync.write(out), {}, { blocks: true, text: true });
-    await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
-    const page = fromTesseract("calendar-week.png", data, png.width, png.height, scale);
-    const { events } = calendarEventsFromOcr([page], { start: "2026-11-02", end: "2026-11-08" }, { csvDateOrder: "MDY" });
-    const summary = events.map((ev) => [ev.date, ev.title, ev.start, ev.end]);
-    console.log("calendar →", JSON.stringify(summary));
-    const byTitle = (s: string) => events.find((ev) => ev.title.includes(s));
-    expect(byTitle("Forecast model")).toMatchObject({ date: "2026-11-02", start: "09:00", end: "10:30" });
-    expect(byTitle("Initech")).toMatchObject({ date: "2026-11-03", start: "13:00", end: "14:15" });
-    const globex = byTitle("Globex");
-    expect(globex).toMatchObject({ date: "2026-11-02", start: null, end: null, minutes: null });
-    expect(globex!.parseNotes!.some((n) => n.code === "screenshot-time")).toBe(true);
-    expect(byTitle("Umbrella")).toMatchObject({ date: "2026-11-04", start: null });
-    expect(events.every((ev) => ev.parseNotes?.some((n) => n.code === "screenshot-date"))).toBe(true);
-  }, 60_000);
 });

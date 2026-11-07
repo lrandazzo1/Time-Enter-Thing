@@ -4,8 +4,8 @@ import { useStore } from "./store";
 import { Badge, Button, Card, Notice } from "./ui";
 import { ManualEntry } from "./ImportStep";
 import type { ImportNote, ProjectMapping, TimeEntry } from "@/lib/types";
-import { dailyTotals, findDuplicates, findOverlaps, mergeEntries, splitOverlapEvenly, totals, validate } from "@/lib/review";
-import { formatDecimalHours, listDates, parseHoursInput, prettyDate } from "@/lib/time";
+import { dailyTotals, findDuplicates, findOverlaps, keepOneInOverlap, mergeEntries, splitOverlapEvenly, totals, validate } from "@/lib/review";
+import { formatDecimalHours, intervalMinutes, isValidHHMM, listDates, parseHoursInput, prettyDate } from "@/lib/time";
 import { upsertRules } from "./MatchStep";
 import { uid } from "@/lib/uid";
 
@@ -17,6 +17,8 @@ export function entryStatus(e: TimeEntry, project?: ProjectMapping): { label: st
   if (e.confirmed) return { label: project && !project.billable ? "Confirmed · internal" : "Confirmed", tone: "success" };
   return { label: project && !project.billable ? "Proposed · internal" : e.source === "manual" ? "Proposed (manual)" : "Proposed", tone: "info" };
 }
+
+const short = (t: string) => (t.length > 34 ? t.slice(0, 32) + "…" : t);
 
 export function durationWords(min: number): string {
   const m = Math.round(min);
@@ -118,14 +120,26 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
             Together they claim <strong>{formatDecimalHours(c.claimedMinutes)} h</strong>, but only <strong>{formatDecimalHours(c.unionMinutes)} h</strong> of clock time passed:{" "}
             {entries.filter((e) => c.entryIds.includes(e.id)).map((e) => `${e.intervals.map((i) => `${i.start}–${i.end}`).join(", ")} ${e.description || e.title}`).join(" · ")}
           </p>
+          <p className="small">Which did you actually attend? Nothing is changed until you choose.</p>
           <div className="row wrap gap-sm mt">
+            {entries.filter((e) => c.entryIds.includes(e.id)).map((m) => (
+              <Button key={`keep-${m.id}`} size="sm" onClick={() => {
+                const r = keepOneInOverlap(entries, c, m.id);
+                setEntries((prev) => prev.map((e) => (r[e.id] !== undefined ? { ...e, minutes: r[e.id], confirmed: false } : e)));
+                setFlash(`Kept “${m.description || m.title}”; the overlapping time was removed from the other meeting${c.entryIds.length > 2 ? "s" : ""}.`);
+              }}>Keep “{short(m.description || m.title)}”</Button>
+            ))}
             <Button size="sm" onClick={() => {
               const split = splitOverlapEvenly(entries, c);
               setEntries((prev) => prev.map((e) => (split[e.id] !== undefined ? { ...e, minutes: split[e.id], confirmed: false } : e)));
-              setFlash("Overlapping time split evenly between the meetings. Adjust if you spent more time in one.");
-            }}>Split overlap evenly</Button>
-            <Button size="sm" variant="ghost" onClick={() => setEntries((prev) => prev.map((e) => (c.entryIds.includes(e.id) ? { ...e, overlapAck: true } : e)))}>Hours are correct as entered</Button>
-            <span className="muted small">Or exclude the meeting you didn&apos;t attend, or edit the hours below.</span>
+              setFlash("The overlapping time was split between the meetings. Adjust the hours if the split wasn't even.");
+            }}>Split the overlap</Button>
+          </div>
+          <div className="row wrap gap-sm mt">
+            {entries.filter((e) => c.entryIds.includes(e.id)).map((m) => (
+              <Button key={`ex-${m.id}`} size="sm" variant="ghost" onClick={() => setEntries((prev) => prev.map((e) => (e.id === m.id ? { ...e, included: false, excludeReason: "Excluded by you (overlap)", confirmed: false } : e)))}>Exclude “{short(m.description || m.title)}”</Button>
+            ))}
+            <span className="muted small">…or type the actual hours in the table below.</span>
           </div>
         </Notice>
       ))}
@@ -184,12 +198,14 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
           <thead>
             <tr>
               <th className="col-inc" aria-label="Include">Incl.</th>
-              <th className="col-time">Time</th>
-              <th className="col-proj">Client / Project</th>
+              <th className="col-date">Date</th>
+              <th className="col-desc">Meeting / Description</th>
+              <th className="col-proj">Project</th>
               <th className="col-task">Task</th>
-              <th className="col-desc">Description</th>
-              <th className="col-loc">Location</th>
+              <th className="col-clock">Start</th>
+              <th className="col-clock">End</th>
               <th className="col-hours">Hours</th>
+              <th className="col-loc">Location</th>
               <th className="col-status">Status</th>
               <th className="col-act" aria-label="Actions" />
             </tr>
@@ -200,7 +216,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
             return (
               <tbody key={d || "nodate"}>
                 <tr className="day-row">
-                  <th colSpan={6}>
+                  <th colSpan={7}>
                     <div className="row gap-sm align-center">
                       {d ? prettyDate(d) : "No date — set a work date"}
                       {(d < period.start || d > period.end) && d && <Badge tone="warning">outside period</Badge>}
@@ -209,10 +225,11 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
                   <th className="col-hours day-total">{formatDecimalHours(daily[d] ?? 0)}</th>
                   <th />
                   <th />
+                  <th />
                 </tr>
                 {rows.length === 0 && (
                   <tr className="empty-row">
-                    <td colSpan={9} className="muted small">No entries</td>
+                    <td colSpan={11} className="muted small">No entries</td>
                   </tr>
                 )}
                 {rows.map((e) => (
@@ -223,8 +240,9 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
           })}
           <tfoot>
             <tr>
-              <th colSpan={6}>Week total</th>
+              <th colSpan={7}>Week total</th>
               <th className="col-hours">{formatDecimalHours(t.total)}</th>
+              <th />
               <th />
               <th />
             </tr>
@@ -248,7 +266,7 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
       )}
 
       <div className="row space-between wrap gap">
-        <Button onClick={onBack}>← Import more</Button>
+        <Button onClick={onBack}>← Match projects</Button>
         <Button variant="primary" onClick={onNext}>{errorCount ? `Continue to export (${errorCount} to resolve)` : "Continue to export →"}</Button>
       </div>
     </div>
@@ -265,9 +283,19 @@ function EntryRow({ e, projects, project, errors, overlap, dup, update, remove, 
       <td className="col-inc" data-label="Include">
         <input type="checkbox" checked={e.included} aria-label={e.included ? "Included — click to exclude" : "Excluded — click to include"} onChange={(ev) => update(e.id, { included: ev.target.checked, excludeReason: ev.target.checked ? undefined : "Excluded by you" })} />
       </td>
-      <td className="col-time" data-label="Time">
+      <td className="col-date" data-label="Date">
         <input type="date" className={`date-input ${err("date") ? "has-error" : ""}`} value={e.date} aria-label="Work date" onChange={(ev) => update(e.id, { date: ev.target.value })} />
-        <div className="time-range">{e.intervals.length ? e.intervals.map((i) => `${i.start}–${i.end}`).join(", ") : <span className="muted">no times</span>}</div>
+      </td>
+      <td className="col-desc" data-label="Meeting / Description">
+        <input value={e.description} maxLength={1000} aria-label="Description" onChange={(ev) => update(e.id, { description: ev.target.value })} />
+        {e.title && e.title !== e.description && <div className="row-title" title="Calendar title">📅 {e.title}</div>}
+        {!e.included && e.excludeReason && <div className="row-note muted">Excluded: {e.excludeReason}</div>}
+        {e.included && overlap && <div className="row-note text-error">Overlaps another meeting</div>}
+        {e.included && dup && <div className="row-note text-error">Possible duplicate</div>}
+        {e.included && notes.filter((n) => n.code !== "canceled" && n.code !== "all-day" && n.code !== "free" && n.code !== "excluded-keyword" && n.code !== "duplicate").map((n, i) => (
+          <div key={i} className={`row-note ${n.level === "warning" ? "text-warning" : "muted"}`}>{n.level === "warning" ? "⚠ " : ""}{n.message}</div>
+        ))}
+        {e.sourceText && <details className="source"><summary>Source</summary><pre>{e.sourceText}</pre></details>}
       </td>
       <td className="col-proj" data-label="Project">
         <select className={err("project") ? "has-error" : ""} value={e.projectId ?? ""} aria-label="Project" onChange={(ev) => {
@@ -293,8 +321,7 @@ function EntryRow({ e, projects, project, errors, overlap, dup, update, remove, 
         </select>
         <div className="row-meta">
           {project && !project.billable && <Badge>internal</Badge>}
-          <Badge title={e.sourceLabel}>{e.source === "screenshot" ? "from screenshot" : e.source === "manual" ? "manual" : e.source.toUpperCase()}</Badge>
-          {e.status === "tentative" && <Badge tone="warning">tentative</Badge>}
+          <Badge title={e.sourceLabel}>{e.source === "pdf" ? "calendar" : "manual"}</Badge>
         </div>
       </td>
       <td className="col-task" data-label="Task">
@@ -306,21 +333,18 @@ function EntryRow({ e, projects, project, errors, overlap, dup, update, remove, 
           {project && e.task && !project.tasks.includes(e.task) && <option value={e.task}>{e.task} (not configured)</option>}
         </select>
       </td>
-      <td className="col-desc" data-label="Description">
-        <input value={e.description} maxLength={1000} aria-label="Description" onChange={(ev) => update(e.id, { description: ev.target.value })} />
-        {e.title && e.title !== e.description && <div className="row-title" title="Calendar title">📅 {e.title}</div>}
-        {!e.included && e.excludeReason && <div className="row-note muted">Excluded: {e.excludeReason}</div>}
-        {e.included && overlap && <div className="row-note text-error">Overlaps another entry</div>}
-        {e.included && dup && <div className="row-note text-error">Possible duplicate</div>}
-        {e.included && notes.filter((n) => n.code !== "canceled" && n.code !== "all-day" && n.code !== "free" && n.code !== "excluded-keyword" && n.code !== "duplicate").map((n, i) => (
-          <div key={i} className={`row-note ${n.level === "warning" ? "text-warning" : "muted"}`}>{n.level === "warning" ? "⚠ " : ""}{n.message}</div>
-        ))}
+      <td className="col-clock" data-label="Start">
+        <ClockInput e={e} which="start" update={update} />
       </td>
-      <td className="col-loc" data-label="Location">
-        <input className={err("location") ? "has-error" : ""} value={e.location} aria-label="Location" onChange={(ev) => update(e.id, { location: ev.target.value })} />
+      <td className="col-clock" data-label="End">
+        <ClockInput e={e} which="end" update={update} />
       </td>
       <td className="col-hours" data-label="Hours">
         <HoursInput minutes={e.minutes} invalid={err("hours")} onChange={(m) => update(e.id, { minutes: m })} />
+        {e.scheduledMinutes !== undefined && Math.abs(e.scheduledMinutes - e.minutes) > 0.5 && <div className="row-note muted">scheduled {formatDecimalHours(e.scheduledMinutes)}</div>}
+      </td>
+      <td className="col-loc" data-label="Location">
+        <input className={err("location") ? "has-error" : ""} value={e.location} aria-label="Location" onChange={(ev) => update(e.id, { location: ev.target.value })} />
       </td>
       <td className="col-status" data-label="Status">
         <Badge tone={st.tone}>{st.label}</Badge>
@@ -369,5 +393,33 @@ export function HoursInput({ minutes, onChange, invalid }: { minutes: number; on
       />
       {bad && <div className="row-note text-error">Use decimals, e.g. 1.50</div>}
     </div>
+  );
+}
+
+/** Start/end time editor for single-interval entries. Changing the times updates hours only if they hadn't been edited. */
+function ClockInput({ e, which, update }: { e: TimeEntry; which: "start" | "end"; update: (id: string, p: Partial<TimeEntry>) => void }) {
+  const iv = e.intervals[0];
+  if (e.intervals.length > 1) return <span className="small muted">{e.intervals.map((i) => `${i.start}–${i.end}`).join(", ")}</span>;
+  const value = iv ? (iv[which] === "24:00" ? "23:59" : iv[which]) : "";
+  return (
+    <input
+      type="time"
+      className="clock-input"
+      aria-label={which === "start" ? "Start time" : "End time"}
+      value={value}
+      onChange={(ev) => {
+        const v = ev.target.value;
+        if (!isValidHHMM(v)) return;
+        const next = iv ? { ...iv, [which]: v } : { start: which === "start" ? v : v, end: which === "end" ? v : v };
+        const before = iv ? intervalMinutes(iv.start, iv.end) : 0;
+        const after = intervalMinutes(next.start, next.end);
+        if (after <= 0 && iv) {
+          update(e.id, { intervals: [next] });
+          return;
+        }
+        const followTimes = !iv || Math.abs(e.minutes - before) < 0.5;
+        update(e.id, { intervals: [next], ...(followTimes && after > 0 ? { minutes: after } : {}) });
+      }}
+    />
   );
 }

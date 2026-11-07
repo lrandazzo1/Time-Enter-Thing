@@ -48,7 +48,7 @@ export interface Settings {
 }
 
 export type BusyStatus = "busy" | "tentative" | "free" | "oof" | "elsewhere" | "unknown";
-export type EntrySource = "ics" | "csv" | "screenshot" | "paste" | "manual";
+export type EntrySource = "pdf" | "manual";
 
 export interface Interval {
   /** "HH:MM" 24-hour, in Settings.timeZone */
@@ -115,9 +115,15 @@ export interface TimeEntry {
   /** User approved this line as time actually worked. */
   confirmed?: boolean;
   /** A suggested (not applied) project from fuzzy/domain matching. */
-  suggestion?: { projectId: string; reason: string };
+  suggestion?: { projectId: string; reason: string; task?: string; alias?: string };
   /** Email domains of the organizer/attendees (calendar files only), used for matching hints. */
   domains?: string[];
+  /** Scheduled duration from the calendar, in minutes (minutes may differ once the user enters actual time). */
+  scheduledMinutes?: number;
+  organizer?: string;
+  /** Redacted source text from the PDF, for troubleshooting. Never exported. */
+  sourceText?: string;
+  endDate?: string;
 }
 
 /** Raw calendar event produced by a parser, before matching. */
@@ -136,6 +142,12 @@ export interface CalendarEvent {
   crossesMidnight?: boolean;
   /** Organizer/attendee email domains (lowercase). */
   domains?: string[];
+  /** Organizer display name from the calendar (used as a matching hint only). */
+  organizer?: string;
+  /** Last day of a multi-day all-day event (YYYY-MM-DD). */
+  endDate?: string;
+  /** Redacted source text (title, time line, location/organizer) kept locally for troubleshooting. */
+  sourceText?: string;
   /** Extra review notes produced by the parser (e.g. screenshot inference). */
   parseNotes?: { code: "screenshot-time" | "screenshot-date" | "info"; message: string }[];
   source: EntrySource;

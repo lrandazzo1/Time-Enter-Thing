@@ -118,7 +118,7 @@ describe("import → save → match → export", async () => {
     expect(b.projects[0]).toMatchObject({ code: "P000001-001", location: undefined });
   });
   it("matches calendar events, uses the project's location and exports the exact six columns", () => {
-    const ev = (title: string, s: string, e: string, m: number): CalendarEvent => ({ title, description: "", location: "", date: "2026-11-03", start: s, end: e, minutes: m, allDay: false, canceled: false, status: "busy", recurring: false, source: "ics" });
+    const ev = (title: string, s: string, e: string, m: number): CalendarEvent => ({ title, description: "", location: "", date: "2026-11-03", start: s, end: e, minutes: m, allDay: false, canceled: false, status: "busy", recurring: false, source: "pdf" });
     const s2 = { ...settings, defaultLocation: "Main Office" };
     const entries: TimeEntry[] = [
       eventToEntry(ev("Acme Components | Gears | Forecast model", "09:00", "09:30", 30), saved, s2),

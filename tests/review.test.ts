@@ -4,7 +4,7 @@ import type { TimeEntry } from "@/lib/types";
 import { period, projects, settings } from "./helpers";
 
 const entry = (id: string, start: string, end: string, minutes: number, extra: Partial<TimeEntry> = {}): TimeEntry => ({
-  id, source: "ics", title: id, date: "2026-11-05", intervals: [{ start, end }], minutes, projectId: "acme", task: "Planning",
+  id, source: "pdf", title: id, date: "2026-11-05", intervals: [{ start, end }], minutes, projectId: "acme", task: "Planning",
   description: `Work ${id}`, location: "Main Office", included: true, status: "busy", notes: [], ...extra,
 });
 

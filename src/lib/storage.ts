@@ -112,6 +112,8 @@ export interface Draft {
   entries: TimeEntry[];
   period: Period;
   savedAt: string;
+  /** Summary of the last calendar PDF import (counts, warnings). */
+  lastImport?: unknown;
 }
 export const loadDraft = () => read<Draft>(KEYS.draft);
 export const saveDraft = (d: Draft) => write(KEYS.draft, d);

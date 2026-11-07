@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.2.0 — Outlook Detailed agenda PDF is the only calendar import
+
+### Removed
+- Calendar import from **.ics** and **.csv** files (and the `ical.js` dependency and Windows time-zone table).
+- **Pasted calendar text** and **calendar screenshots** (OCR) as calendar sources. Tesseract OCR remains only for optional Projector *project-list* screenshots.
+- Image uploads on the calendar step. There is no AI, OCR or other fallback for calendar PDFs.
+
+### Added
+- **Upload Your Outlook Calendar PDF** (`.pdf` only). Text is extracted in the browser with **pdf.js** (legacy build, worker and standard fonts self-hosted under `/pdfjs/`). Password-protected, damaged, oversized (>300 pages), image-only and grid-style PDFs get specific messages; a PDF without text shows exactly *“This PDF doesn't contain readable meeting details. Please export from Outlook using Detailed agenda.”*
+- **Outlook Detailed agenda parser** (`src/lib/pdf/agenda.ts`): title, date, start, end, minutes, decimal hours, organizer, location, canceled, all-day and a redacted source extract per event. Handles page breaks inside an event, repeated day/page headings, wrapped titles, long attendee lists, multi-page descriptions, 12/24-hour times and AM/PM combinations, events that cross midnight (split per day), all-day events repeated each day (collapsed), exact duplicates (removed and reported) and unusual durations. Ignores Teams links, meeting IDs, passcodes, dial-in numbers, e-mail addresses, signatures and notices.
+- New five-step workflow: **Upload calendar PDF → Review extracted meetings → Match projects → Review hours → Download CSV**.
+- **Review extracted meetings** step: meetings found, dates covered, canceled and all-day counts, duplicates, overlaps; per-meeting include/exclude; a separate *Excluded events* list (canceled, all-day, personal) where each event can be included.
+- **Overlap choices**: keep one meeting (the other loses only the overlapping minutes), split the overlap, exclude one, or edit times manually. Nothing is split automatically and overlapping time is never counted twice.
+- Review table columns **Date, Meeting/Description, Project, Task, Start, End, Hours, Location, Status**, with editable start/end times and *scheduled vs confirmed* hours.
+- Matching uses the **organizer** (name and e-mail domain), first-word abbreviations (“KM” → *KM Industries*), the task named in the title, and offers to save the matched word as a project alias. Your own company's name alone never selects the internal project; “internal” meetings that mention a client ask which project applies.
+- Setup Guide: step-by-step *Detailed agenda → Save as PDF* instructions and a warning not to use the grid layouts.
+- Tests: synthetic multi-page agenda PDF (long descriptions, attendee lists, page-boundary titles, duplicates, canceled, all-day, midnight), grid, image-only and malformed PDFs; parser, matching, overlap and exact-CSV regression tests; an optional local-only test for a real PDF.
+
+### Unchanged
+- The six-column BigTime CSV (`Description,Location,Project,Task,Work Date,Work Hours`, `MM/DD/YYYY`, two decimals, no Role/Rate, UTF-8 or ANSI, escaping and validation), Projector Excel import, saved projects, matching rules and backups.
+
 ## 2.1.0 — Native Projector Excel report import
 
 ### Added

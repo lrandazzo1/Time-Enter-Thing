@@ -20,7 +20,7 @@ const SECTIONS = [
   ["quick", "Quick start"],
   ["report", "Which Projector report to export"],
   ["projects", "Other ways to import projects"],
-  ["outlook", "Export your Outlook calendar"],
+  ["outlook", "Export your Outlook calendar (PDF)"],
   ["bigtime", "Import the CSV into BigTime"],
   ["role", "Role and Rate Type"],
   ["privacy", "Privacy & storage"],
@@ -49,14 +49,14 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
               <li>Download your Projector <strong>Time Card Report</strong> as Excel and upload it as-is (<button className="link" onClick={onProjects}>Projects</button>).</li>
               <li>Check the detected clients, codes and tasks, then save.</li>
               <li>Enter your BigTime location once.</li>
-              <li>Import this week&apos;s Outlook calendar.</li>
+              <li>Upload this week&apos;s Outlook calendar as a <strong>Detailed agenda PDF</strong>.</li>
               <li>Review the hours, approve, download the CSV.</li>
             </ol>
           </div>
           <div>
             <h3>Every week after that</h3>
             <ol className="guide-steps">
-              <li>Open <button className="link" onClick={onStart}>Timesheet</button> and import the calendar.</li>
+              <li>Print your Outlook week as a <strong>Detailed agenda PDF</strong> and upload it on <button className="link" onClick={onStart}>Timesheet</button>.</li>
               <li>Match anything new (the app remembers your choices).</li>
               <li>Correct hours to what you actually worked and approve.</li>
               <li>Download and import into BigTime.</li>
@@ -126,15 +126,23 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
         <p className="small muted">We don&apos;t have a verified screenshot of every Projector screen, so these steps describe what to capture rather than exact menu names. If your screen looks different, any view that shows the project name, code and tasks works.</p>
       </Card>
 
-      <Card title="Export your Outlook calendar">
+      <Card title="Export your Outlook calendar as a Detailed agenda PDF">
         <span id="help-outlook" className="anchor-target" />
-        <ul className="guide-steps">
-          <li><strong>Outlook for Windows (classic):</strong> File → Save Calendar → <em>More Options</em> → date range + <em>Full details</em> → Save (.ics). Or File → Open &amp; Export → Import/Export → <em>Export to a file</em> → <em>Comma Separated Values</em> → Calendar (.csv).</li>
-          <li><strong>New Outlook / Outlook on the web:</strong> Settings → Calendar → Shared calendars → <em>Publish a calendar</em> → “Can view all details” → open the ICS link to download the .ics. Keep that link private.</li>
-          <li><strong>Outlook for Mac:</strong> drag the calendar (or selected events) to the desktop to create an .ics file, or File → Export.</li>
-          <li><strong>Can&apos;t export?</strong> Switch Outlook to the list view, select the week&apos;s events, copy, and use <em>Paste event information</em>. Calendar screenshots are a last resort: they rarely show exact times.</li>
-        </ul>
-        <p className="small muted">Time zones, recurring meetings, moved occurrences and cancellations in .ics files are handled automatically. Canceled meetings, all-day events, “free” time and personal items are excluded but stay visible so you can include them.</p>
+        <p>The calendar is imported from one file each week: Outlook&apos;s <strong>Detailed agenda</strong> printed to PDF. It is the only format that lists every meeting&apos;s full title with its exact date, start and end time.</p>
+        <ol className="guide-steps">
+          <li>Open <strong>Outlook</strong> and go to <strong>Calendar</strong>.</li>
+          <li>Navigate to the week you want to record.</li>
+          <li>Select <strong>Home → Print</strong> (or <strong>File → Print</strong>; in new Outlook / Outlook on the web use the <strong>Print</strong> button on the calendar toolbar).</li>
+          <li>Set the date range — e.g. Monday to Sunday of that week.</li>
+          <li>Choose the <strong>Detailed agenda</strong> print style.</li>
+          <li>As the printer pick <strong>Microsoft Print to PDF</strong> (Windows) or <strong>Save as PDF</strong> (Mac / browser).</li>
+          <li>Save the PDF to your computer.</li>
+          <li>On <button className="link" onClick={onStart}>Timesheet</button>, drop the PDF onto <em>Upload Your Outlook Calendar PDF</em>.</li>
+        </ol>
+        <Notice tone="warning" title="Use “Detailed agenda”, not the calendar grid">
+          The normal day / work week / month print cuts meeting titles short and doesn&apos;t write out start and end times, so it can&apos;t be used. Outlook <code>.ics</code>/<code>.csv</code> exports and screenshots aren&apos;t accepted either — exports often show only “Busy”, and screenshots lose titles and times. If you upload the wrong PDF the app says so instead of guessing.
+        </Notice>
+        <p className="small muted">The PDF is read inside your browser and never uploaded. From each meeting the app keeps only its title, date, times, organizer and location; meeting links, passcodes and attendee lists are ignored and never appear in your timesheet. Canceled meetings and all-day events (for example colleagues&apos; PTO) are excluded by default but listed so you can include them.</p>
       </Card>
 
       <Card title="Import the CSV into BigTime">
@@ -192,7 +200,7 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
       <Card title="Privacy & storage">
         <span id="help-privacy" className="anchor-target" />
         <ul className="guide-steps">
-          <li>Calendar files, pasted text and screenshots are processed <strong>inside your browser</strong>. Text recognition (OCR) runs on your device using open-source Tesseract; its engine files come from this website, and your images are never uploaded. The site&apos;s security policy blocks the page from sending data to any other server.</li>
+          <li>Your calendar PDF, Projector report and any project screenshots are processed <strong>inside your browser</strong> with open-source pdf.js (and Tesseract for screenshots), served from this website. Nothing is uploaded, and the site&apos;s security policy blocks the page from sending data to any other server.</li>
           <li>Projects, settings, remembered matches and the current timesheet are saved in this browser&apos;s local storage. They are <strong>specific to this device and browser</strong>, not synced, and are erased if you clear site data. Download a backup from the Projects page and restore it on another computer.</li>
           <li>No accounts, analytics, cookies for tracking, AI services or API keys. Nothing is submitted to BigTime.</li>
           <li>Browser storage is convenient, not an enterprise security control. Make sure your company allows using this tool with client information, and use it on a work device.</li>
@@ -205,7 +213,7 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
           <li><strong>Screenshot text recognition isn&apos;t perfect.</strong> Blurry, low-resolution, heavily scaled or cropped screenshots produce missing or misread text. Codes that may contain look-alike characters (O/0, I/1, S/5) are flagged for you to check — the app never silently “fixes” them. When in doubt, paste text instead.</li>
           <li><strong>Hidden tasks can&apos;t be read.</strong> Expand projects before capturing. Tasks at the top of a screenshot whose project is on the previous screenshot are offered as “tasks without a project” for you to assign.</li>
           <li><strong>The first scan downloads the OCR engine</strong> (~11 MB, from this site) and caches it; later scans start quickly. Very old browsers without WebAssembly can&apos;t scan — use copied text.</li>
-          <li><strong>Calendar screenshots</strong> only provide times that are written in the image; block positions are never turned into hours.</li>
+          <li><strong>Calendar PDF</strong>: only Outlook&apos;s Detailed agenda is supported. Times are read as printed (your Outlook time zone). Meetings that run past midnight are split by day. Scanned or image-only PDFs have no readable text and are rejected.</li>
           <li><strong>Calendar time is a proposal.</strong> Every line must be approved before export; adjust hours to what you actually worked.</li>
         </ul>
       </Card>

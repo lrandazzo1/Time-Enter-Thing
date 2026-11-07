@@ -49,6 +49,8 @@ export interface FuzzyHit<T> {
   item: T;
   score: number;
   reason: string;
+  /** The word in the text that matched (e.g. "TFAG"), useful as a short-name alias. */
+  token?: string;
 }
 
 /**
@@ -60,16 +62,26 @@ export function bestFuzzy<T>(text: string, items: T[], nameOf: (t: T) => string[
   const rawTokens = norm(text).split(" ");
   if (!tokens.length && !rawTokens.length) return null;
   const hits: FuzzyHit<T>[] = [];
+  const origTokens = text.split(/[^A-Za-z0-9&]+/).filter(Boolean);
   for (const item of items) {
     let best = 0;
     let reason = "";
+    let token: string | undefined;
     for (const name of nameOf(item)) {
       const ntoks = significantTokens(name);
       for (const ac of acronyms(name)) {
         if (ac.length >= 3 && rawTokens.includes(ac)) {
           best = Math.max(best, 0.86);
           reason = `“${ac.toUpperCase()}” looks like the initials of ${name}`;
+          token = origTokens.find((t) => t.toLowerCase() === ac);
         }
+      }
+      // "KM" for "KM Industries": an all-caps abbreviation that starts the client name.
+      const first = name.trim().split(/\s+/)[0] ?? "";
+      if (name.trim().includes(" ") && /^[A-Z][A-Z0-9&]{1,4}$/.test(first) && origTokens.includes(first) && best < 0.84) {
+        best = 0.84;
+        reason = `“${first}” is how ${name} starts`;
+        token = first;
       }
       for (const nt of ntoks) {
         for (const t of tokens) {
@@ -77,11 +89,12 @@ export function bestFuzzy<T>(text: string, items: T[], nameOf: (t: T) => string[
           if (d > best && d >= 0.72 && Math.min(nt.length, t.length) >= 4) {
             best = d;
             reason = `“${t}” is similar to ${name}`;
+            token = undefined;
           }
         }
       }
     }
-    if (best > 0) hits.push({ item, score: best, reason });
+    if (best > 0) hits.push({ item, score: best, reason, token });
   }
   hits.sort((a, b) => b.score - a.score);
   if (!hits.length) return null;

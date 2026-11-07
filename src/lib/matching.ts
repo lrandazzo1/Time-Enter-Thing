@@ -98,6 +98,9 @@ export function matchEvent(title: string, description: string, projects: Project
     // "Our Firm | Acme: Working Session" — an internal (own-company) name in front of a client name
     // is not the naming convention; let the client match below decide.
     if (project && !project.billable && projects.some((p) => p.billable && namesOf(p).some((n) => containsPhrase(parts.slice(1).join(" "), n)))) project = null;
+    // Your own organisation's name in front of a "|" is only the convention when the next part is one
+    // of that internal project's tasks ("OurFirm | Internal - Meeting | Team sync").
+    if (project && !project.billable && !project.aliases.some((a) => normalize(a) === normalize(parts[0])) && !(parts[1] && findTask(parts[1], project))) project = null;
     if (project) {
       const task = parts[1] ? findTask(parts[1], project) : null;
       if (task) return { projectId: project.id, task, description: desc || t, notes };
@@ -233,13 +236,49 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
   let candidates = m.candidates;
   let suggestion: TimeEntry["suggestion"];
 
+  const internalOnly = (ids?: string[]) => Boolean(ids?.length) && ids!.every((id) => projects.find((p) => p.id === id)?.billable === false);
+  const saysInternal = /\binternal\b/i.test(ev.title);
+  const internals = projects.filter((p) => !p.billable).map((p) => p.id);
+  const dropNotes = (...codes: string[]) => {
+    for (const c of codes) for (let i = notes.findIndex((n) => n.code === c); i >= 0; i = notes.findIndex((n) => n.code === c)) notes.splice(i, 1);
+  };
+
+  // 3b. organizer name — calendar resource accounts are often named after the client ("Organizer: Acme Corp")
+  if (!projectId && (!candidates || internalOnly(candidates)) && ev.organizer) {
+    const org = normalize(ev.organizer);
+    const byOrg = projects.filter((p) => p.billable && [p.client, ...p.aliases].some((n) => normalize(n) === org));
+    if (byOrg.length === 1) {
+      const p = byOrg[0];
+      if (saysInternal && internals.length) {
+        candidates = [p.id, ...internals];
+        dropNotes("no-project", "ambiguous-project");
+        notes.push({ code: "ambiguous-project", level: "warning", message: `Organized by ${p.client} but says “internal” — bill it to ${p.client}, or record it as internal time?` });
+      } else {
+        projectId = p.id;
+        candidates = undefined;
+        const mentioned = tasksMentioned(ev.title + " " + ev.description, p);
+        task = mentioned.length === 1 ? mentioned[0] : resolveDefaultTask(p) ?? "";
+        dropNotes("no-project", "ambiguous-project");
+        notes.push({ code: "domain-match", level: "warning", message: `Matched ${p.client} from the meeting organizer (“${ev.organizer}”) — confirm.` });
+        if (!task) notes.push({ code: "task-unclear", level: "warning", message: `Choose which ${p.client} task this was.` });
+      }
+    }
+  }
+
   // 4. organizer / attendee e-mail domain (strong contextual signal, still shown for confirmation)
-  if (!projectId && !candidates && ev.domains?.length) {
+  if (!projectId && (!candidates || internalOnly(candidates)) && ev.domains?.length) {
     const byDomain = projects.filter((p) => p.billable && ev.domains!.some((d) => domainMatchesClient(d, p.client) || p.aliases.some((a) => domainMatchesClient(d, a))));
-    if (byDomain.length === 1) {
+    if (byDomain.length === 1 && saysInternal && internals.length) {
+      candidates = [byDomain[0].id, ...internals];
+      dropNotes("no-project", "ambiguous-project");
+      notes.push({ code: "ambiguous-project", level: "warning", message: `A ${byDomain[0].client} meeting that says “internal” — bill it to ${byDomain[0].client}, or record it as internal time?` });
+    } else if (byDomain.length === 1) {
       const p = byDomain[0];
       projectId = p.id;
-      task = resolveDefaultTask(p) ?? "";
+      candidates = undefined;
+      dropNotes("ambiguous-project");
+      const mentioned = tasksMentioned(ev.title + " " + ev.description, p);
+      task = mentioned.length === 1 ? mentioned[0] : resolveDefaultTask(p) ?? "";
       const i = notes.findIndex((n) => n.code === "no-project");
       if (i >= 0) notes.splice(i, 1);
       notes.push({ code: "domain-match", level: "warning", message: `Matched ${p.client} from the meeting's e-mail domain (${ev.domains!.find((d) => domainMatchesClient(d, p.client) || p.aliases.some((a) => domainMatchesClient(d, a)))}) — confirm.` });
@@ -252,10 +291,18 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
   const onlyInternal = candidates?.every((id) => projects.find((p) => p.id === id)?.billable === false);
   if (!projectId && (!candidates || onlyInternal)) {
     const pool = onlyInternal ? projects.filter((p) => p.billable) : projects;
-    const hit = bestFuzzy(cleanTitle(ev.title), pool, (p) => [p.client, ...p.aliases]);
+    // Your own organisation's name is noise for guessing the client.
+    let text = cleanTitle(ev.title);
+    for (const p of projects.filter((x) => !x.billable)) text = text.replace(new RegExp(`(^|[^A-Za-z0-9])${escapeRegex(p.client)}(?=$|[^A-Za-z0-9])`, "gi"), "$1 ");
+    const hit = bestFuzzy(text, pool, (p) => [p.client, ...p.aliases]);
     if (hit) {
-      suggestion = { projectId: hit.item.id, reason: hit.reason };
+      const mentioned = tasksMentioned(ev.title + " " + ev.description, hit.item);
+      suggestion = { projectId: hit.item.id, reason: hit.reason, task: mentioned.length === 1 ? mentioned[0] : resolveDefaultTask(hit.item) ?? undefined, alias: hit.token };
       notes.push({ code: "fuzzy-suggestion", level: "warning", message: `Possibly ${hit.item.client} (${hit.reason}) — confirm or choose another project.` });
+      if (saysInternal && internals.length && hit.item.billable) {
+        candidates = [hit.item.id, ...internals.filter((id) => id !== hit.item.id)];
+        notes.push({ code: "ambiguous-project", level: "warning", message: `Says “internal” — bill it to ${hit.item.client}, or record it as internal time?` });
+      }
     }
   }
 
@@ -268,8 +315,8 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
     notes.push({ code: "canceled", level: "info", message: "Canceled meeting — excluded." });
   } else if (ev.allDay) {
     included = false;
-    excludeReason = "All-day event";
-    notes.push({ code: "all-day", level: "info", message: "All-day event — excluded (add hours manually if it was work)." });
+    excludeReason = ev.endDate ? `All-day event (${ev.date} to ${ev.endDate})` : "All-day event";
+    notes.push({ code: "all-day", level: "info", message: "All-day event (e.g. someone's PTO) — excluded. Include it and enter hours only if it was your work." });
   } else if (kw) {
     included = false;
     excludeReason = `Matches exclusion keyword "${kw}"`;
@@ -317,6 +364,10 @@ export function eventToEntry(ev: CalendarEvent, projects: ProjectMapping[], sett
     candidates,
     suggestion,
     domains: ev.domains,
+    organizer: ev.organizer,
+    sourceText: ev.sourceText,
+    endDate: ev.endDate,
+    scheduledMinutes: ev.allDay ? undefined : minutes,
     fingerprint: fingerprintOf(ev.date, ev.start, ev.end, ev.title),
   };
 }

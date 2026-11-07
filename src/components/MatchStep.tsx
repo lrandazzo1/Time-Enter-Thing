@@ -106,7 +106,7 @@ export function MatchStep({ onNext, onBack }: { onNext: () => void; onBack: () =
       )}
 
       {groups.map((g) => (
-        <GroupCard key={g.key} g={g} projects={projects} byId={byId} onApply={apply} onExclude={exclude} onAddProjects={(ps) => {
+        <GroupCard key={g.key} g={g} projects={projects} byId={byId} onApply={apply} onExclude={exclude} onAddAlias={(id, a) => setProjects((prev) => prev.map((p) => (p.id === id && !p.aliases.includes(a) ? { ...p, aliases: [...p.aliases, a] } : p)))} onAddProjects={(ps) => {
           const m = mergeProjects(projects, ps);
           setProjects(m.projects);
           return m.projects;
@@ -132,12 +132,18 @@ export function MatchStep({ onNext, onBack }: { onNext: () => void; onBack: () =
   );
 }
 
-function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects }: { g: Group; projects: ProjectMapping[]; byId: Map<string, ProjectMapping>; onApply: (g: Group, projectId: string, task: string, remember: boolean, how: string) => void; onExclude: (g: Group) => void; onAddProjects: (p: ProjectMapping[]) => ProjectMapping[] }) {
+function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects, onAddAlias }: { g: Group; projects: ProjectMapping[]; byId: Map<string, ProjectMapping>; onApply: (g: Group, projectId: string, task: string, remember: boolean, how: string) => void; onExclude: (g: Group) => void; onAddProjects: (p: ProjectMapping[]) => ProjectMapping[]; onAddAlias: (projectId: string, alias: string) => void }) {
   const initialProject = g.projectId ?? g.suggestion?.projectId ?? (g.candidates?.length === 1 ? g.candidates[0] : "");
   const [mode, setMode] = useState<"match" | "report" | "new" | "paste" | "shot">("match");
   const [projectId, setProjectId] = useState(initialProject);
   const project = projectId ? byId.get(projectId) : undefined;
-  const [task, setTask] = useState(project && project.tasks.length === 1 ? project.tasks[0] : project?.defaultTask ?? "");
+  const [task, setTask] = useState(
+    project && g.suggestion?.projectId === project.id && g.suggestion.task && project.tasks.includes(g.suggestion.task)
+      ? g.suggestion.task
+      : project && project.tasks.length === 1 ? project.tasks[0] : project?.defaultTask ?? "",
+  );
+  const alias = g.suggestion?.alias && projectId === g.suggestion.projectId && project && !project.aliases.some((a) => a.toLowerCase() === g.suggestion!.alias!.toLowerCase()) ? g.suggestion.alias : undefined;
+  const [saveAlias, setSaveAlias] = useState(true);
   const [remember, setRemember] = useState(true);
   const hours = g.entries.reduce((a, e) => a + e.minutes, 0);
   const candidates = (g.candidates ?? []).map((id) => byId.get(id)).filter(Boolean) as ProjectMapping[];
@@ -147,7 +153,8 @@ function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects }: { g
   const pick = (id: string) => {
     setProjectId(id);
     const p = byId.get(id);
-    setTask(p ? (p.tasks.length === 1 ? p.tasks[0] : p.defaultTask || "") : "");
+    const sugTask = g.suggestion?.projectId === id && g.suggestion.task && p?.tasks.includes(g.suggestion.task) ? g.suggestion.task : "";
+    setTask(p ? sugTask || (p.tasks.length === 1 ? p.tasks[0] : p.defaultTask || "") : "");
   };
   const afterAdd = (saved: ProjectMapping[], code: string) => {
     const p = saved.find((x) => x.code.toLowerCase() === code.toLowerCase());
@@ -208,12 +215,23 @@ function GroupCard({ g, projects, byId, onApply, onExclude, onAddProjects }: { g
               {project?.tasks.map((t) => <option key={t}>{t}</option>)}
             </select>
           </label>
-          <label className="check align-self-end">
-            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-            <span>Remember for future weeks</span>
-          </label>
+          <div className="stack-xs align-self-end">
+            <label className="check">
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              <span>Remember for future weeks</span>
+            </label>
+            {alias && (
+              <label className="check">
+                <input type="checkbox" checked={saveAlias} onChange={(e) => setSaveAlias(e.target.checked)} />
+                <span>Treat “{alias}” as {project!.client}</span>
+              </label>
+            )}
+          </div>
           <div className="row gap-sm align-self-end">
-            <Button variant="primary" disabled={!project || !task} onClick={() => onApply(g, projectId, task, remember, g.kind === "confirm" ? "Confirmed by you." : "Matched by you.")}>{g.kind === "confirm" ? "Confirm" : `Apply to ${g.entries.length}`}</Button>
+            <Button variant="primary" disabled={!project || !task} onClick={() => {
+              if (alias && saveAlias) onAddAlias(projectId, alias);
+              onApply(g, projectId, task, remember, g.kind === "confirm" ? "Confirmed by you." : "Matched by you.");
+            }}>{g.kind === "confirm" ? "Confirm" : `Apply to ${g.entries.length}`}</Button>
           </div>
         </div>
       )}

@@ -89,7 +89,7 @@ export function Onboarding({ onGuide, onComplete }: { onGuide: () => void; onCom
           embedded
           onGuide={onGuide}
           onStep={(s) => {
-            const want = s <= 1 ? 4 : 5;
+            const want = s <= 2 ? 4 : 5;
             if (want !== step) setSettings((prev) => ({ ...prev, onboardingStep: want }));
           }}
           onExported={onComplete}

@@ -5,7 +5,7 @@ import { projects, settings } from "./helpers";
 
 const ev = (title: string, extra: Partial<CalendarEvent> = {}): CalendarEvent => ({
   title, description: "", location: "", date: "2026-11-02", start: "09:00", end: "10:00", minutes: 60,
-  allDay: false, canceled: false, status: "busy", recurring: false, source: "ics", ...extra,
+  allDay: false, canceled: false, status: "busy", recurring: false, source: "pdf", ...extra,
 });
 
 describe("matching", () => {

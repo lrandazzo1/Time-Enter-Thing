@@ -1,31 +1,92 @@
-# Test results — Timesheet Converter 2.1
+# Test results — Timesheet Converter 2.2
 
-Run on the final code in this ZIP (Node 22, Chromium via Playwright).
+Run on the final code in this ZIP (Node 22, Chromium via Playwright, production build).
 
 ## Summary
 
 | Suite | Result |
 |---|---|
-| Unit + OCR + Excel integration tests (Vitest) | **104 passed, 0 failed** (10 files; the real-report test is skipped unless a local file is supplied) |
-| Excel-report onboarding end-to-end (Playwright, production build) | **12/12 passed** |
-| Original workflow end-to-end (screenshots OCR, returning user, privacy, accessibility, mobile) | **26/26 passed** |
+| Unit, PDF parser, Excel and OCR integration tests (Vitest) | **120 passed, 0 failed** (11 files; the two real-file tests are skipped unless local files are supplied) |
+| End-to-end browser workflow (synthetic PDF + Excel, returning user, privacy, accessibility, mobile) | **26/26 passed** |
+| Type check (`tsc --noEmit`) | **Passed** |
 | Production build (`npm run build`) | **Passed** — static pages only; no API routes, no environment variables |
-| Clean install from this ZIP with all AI variables removed | **Passed** (`npm ci`, `npm run build`, `npm test`) |
+| Clean install of the ZIP contents with no AI variables (`npm ci`, `npm run build`, `npm test`) | **Passed** |
 
-## Your real Projector report (`Test 2026-11-06 13-36-59.xlsx`)
+## Your real Outlook PDF (used locally only)
 
-Used locally as the primary integration input; **it is not included in this ZIP, the repository or the app**. Checked with `tests/excel.private.test.ts` (Node) and `e2e/excel.mjs` (browser):
+The attached Detailed agenda PDF was used only on the development machine, through `tests/pdf.private.test.ts` (`OUTLOOK_PDF=…`) and the optional real-file step of `e2e/workflows.mjs`. **It is not in this ZIP, the repository, `public/`, any fixture, log or screenshot.** Results (counts only):
 
-- Workbook sheets `Report`, `Options`, `Debug` → `Report` selected; header on row 1; columns Project, Role, Work Location, Task Name mapped.
-- 26 time-card rows de-duplicated into **6 projects / 9 tasks**; every project code taken from the final parentheses and valid; one project with 4 tasks kept all 4; task names exact; Role values (which include a person's name on one project) kept only as metadata — never as tasks or in the CSV.
-- Clients separated correctly for all 6 project names; the internal non-billable project was flagged as internal.
-- Work Location: one value on all 26 rows → suggested as the default location.
-- `Options` sheet: date range shown as “25-Oct-2026 – 31-Oct-2026”; filters (resource search string, approved time cards only, etc.) listed. No employee column exists, so no employee filter is shown.
-- In the browser: “Detected 6 projects and 9 tasks”, all 6 *Verified*, one location option.
-- The codes and tasks agree with the project list you confirmed earlier in this conversation.
-- Matching your real Nov 2–6 calendar against only these 6 projects: client meetings named after a client (e.g. “Client | OurFirm … Working Session”, “OurFirm | Client: … Session”) matched the right project and task; meetings that only mention your own company or say “internal” are now offered as choices instead of being assigned (this was a real bug found with your data and fixed); projects missing from the report (one-week report) appear as unrecognised — as intended.
+- 15 pages; week 11/01/2026 – 11/07/2026 read from the PDF header; 5 day headings.
+- **21 timed meetings**, **4 canceled** and **3 all-day** events (multi-day PTO collapsed to one event each); 0 warnings.
+- Durations checked against the PDF, including a 110-minute meeting → `1.83` and 60-minute meetings → `1.00`.
+- Titles split across page breaks and long attendee lists/descriptions were read correctly; Teams links, meeting IDs, passcodes and phone numbers do not appear in extracted descriptions.
+- With the real Projector report, all of the matching examples from the specification behaved as required (prep meeting → its project; a two-client session → the named client and task; a “Company | Client: …” session → the client; an internal status meeting → the client proposed with a billable/internal choice). Nothing was assigned to the internal project just because the company name appeared. (Client names are deliberately left out of this file.)
+- In the browser the same PDF showed *Meetings found 21 · Canceled 4 · All-day 3*.
+
+## End-to-end (`e2e/workflows.mjs`)
+
+Synthetic, fictional data only (`tests/fixtures/pdf/agenda-week.pdf`, 6 pages).
+
+- ✓ projects from the Excel report saved; location suggested from the report
+- ✓ calendar step offers only the PDF upload
+- ✓ calendar-grid PDF rejected with an explanation
+- ✓ image-only PDF rejected with the required message
+- ✓ malformed PDF rejected
+- ✓ extracted-meetings summary: 12 timed meetings, dates, 1 canceled, 2 all-day — MEETINGS FOUND 12 11.83 h scheduled · 6 PDF pages DATES COVERED 11/01/2026 – 11/07/2026 from the PDF header CANCELED 1 excluded by default ALL-DAY 2 PTO, holidays — excluded
+- ✓ duplicate meeting reported and kept once
+- ✓ excluded section lists canceled, all-day and personal items
+- ✓ all included meetings matched
+- ✓ overlap flagged with specific wording, nothing changed automatically
+- ✓ CSV: exact six columns, codes, tasks, locations, decimal hours — BigTime_Timesheet_2026-11-01_to_2026-11-07.csv
+- ✓ CSV filename uses the PDF's date range — BigTime_Timesheet_2026-11-01_to_2026-11-07.csv
+- ✓ setup success state — first-time run 4.362s (automated)
+- ✓ remembered match reused (TFAG not asked again) — 3 group(s) left
+- ✓ returning user: same CSV (ANSI encoding) — 2.018s (automated)
+- ✓ no requests to other hosts and no uploads — 26 same-origin GET requests
+- ✓ pdf.js worker served from this site
+- ✓ CSP restricts connections to this site
+- ✓ axe: no serious/critical issues on #home
+- ✓ axe: no serious/critical issues on #projects
+- ✓ axe: no serious/critical issues on #help
+- ✓ mobile #home: no horizontal scroll — scrollWidth 390
+- ✓ mobile #projects: no horizontal scroll — scrollWidth 390
+- ✓ mobile #help: no horizontal scroll — scrollWidth 390
+- ✓ real Outlook PDF in the browser — MEETINGS FOUND 21 14.67 h scheduled · 15 PDF pages DATES COVERED 11/01/2026 – 11/07/2026 from the PDF header CANCELED 4 excluded by default ALL-DAY 3 PTO, holidays — excluded
+- ✓ no page errors
+
+Exact CSV produced (identical on the returning-user run with ANSI encoding):
+
+```
+Description,Location,Project,Task,Work Date,Work Hours
+Forecast model,Main Office,P001234-001,Gears,11/02/2026,3.00
+Globex Corporation weekly sync,Main Office,P005678-001,Planning Consultant,11/02/2026,1.00
+Smith-Jones Holdings quarterly forecast deep dive and budget reconciliation working session with the finance leadership team,Remote,P002468-002,Consultant,11/03/2026,1.83
+TFAG Internal Status,Main Office,P000999-001,Internal - Meeting,11/04/2026,0.50
+Late support call,Main Office,P005678-001,Planning Consultant,11/04/2026,1.00
+Late support call,Main Office,P005678-001,Planning Consultant,11/05/2026,0.50
+Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05/2026,1.00
+```
 
 ## Unit and integration tests
+
+**tests/time.test.ts** (16)
+
+- ✓ decimal hours > 15 minutes -> 0.25
+- ✓ decimal hours > 30 minutes -> 0.50
+- ✓ decimal hours > 45 minutes -> 0.75
+- ✓ decimal hours > 60 minutes -> 1.00
+- ✓ decimal hours > 90 minutes -> 1.50
+- ✓ decimal hours > 135 minutes -> 2.25
+- ✓ decimal hours > 180 minutes -> 3.00
+- ✓ decimal hours > 210 minutes -> 3.50
+- ✓ decimal hours > 225 minutes -> 3.75
+- ✓ decimal hours > 480 minutes -> 8.00
+- ✓ decimal hours > 110 minutes -> 1.83
+- ✓ decimal hours > 100 minutes -> 1.67
+- ✓ decimal hours > 5 minutes -> 0.08
+- ✓ decimal hours > never produces H:MM
+- ✓ decimal hours > parses user input
+- ✓ time zones > round-trips across DST
 
 **tests/excel.test.ts** (19)
 
@@ -49,11 +110,8 @@ Used locally as the primary integration input; **it is not included in this ZIP,
 - ✓ import → save → match → export > old backups without the new fields still restore
 - ✓ import → save → match → export > matches calendar events, uses the project's location and exports the exact six columns
 
-**tests/workflow.test.ts** (16)
+**tests/workflow.test.ts** (12)
 
-- ✓ pasted calendar events > parses day headings, inline dates and ranges; never invents times
-- ✓ pasted calendar events > delegates header rows (Outlook list copy) to the CSV parser
-- ✓ pasted calendar events > time ranges
 - ✓ matching priority > 1. exact project code wins
 - ✓ matching priority > remembered rules come first and survive date changes in titles
 - ✓ matching priority > own-company internal project doesn't steal client meetings
@@ -61,50 +119,11 @@ Used locally as the primary integration input; **it is not included in this ZIP,
 - ✓ matching priority > 4. organizer domain gives a proposed match that needs confirmation
 - ✓ matching priority > 5. fuzzy matches are suggestions only
 - ✓ matching priority > unknown clients get a readable label
-- ✓ ICS recurring, canceled and organizer domains > still expands the Outlook fixture and drops the user's own domain
 - ✓ project configuration > imports incrementally without losing existing settings
 - ✓ project configuration > restores v1 backups and round-trips v2 backups (with remembered matches)
 - ✓ project configuration > sanitises hostile backup content
 - ✓ project configuration > remembers confirmed matches by title
 - ✓ regression: Nov 2–6 week (synthetic replica) > produces the same rows, hours and totals as the imported file
-
-**tests/time.test.ts** (16)
-
-- ✓ decimal hours > 15 minutes -> 0.25
-- ✓ decimal hours > 30 minutes -> 0.50
-- ✓ decimal hours > 45 minutes -> 0.75
-- ✓ decimal hours > 60 minutes -> 1.00
-- ✓ decimal hours > 90 minutes -> 1.50
-- ✓ decimal hours > 135 minutes -> 2.25
-- ✓ decimal hours > 180 minutes -> 3.00
-- ✓ decimal hours > 210 minutes -> 3.50
-- ✓ decimal hours > 225 minutes -> 3.75
-- ✓ decimal hours > 480 minutes -> 8.00
-- ✓ decimal hours > 110 minutes -> 1.83
-- ✓ decimal hours > 100 minutes -> 1.67
-- ✓ decimal hours > 5 minutes -> 0.08
-- ✓ decimal hours > never produces H:MM
-- ✓ decimal hours > parses user input
-- ✓ time zones > round-trips across DST
-
-**tests/ics.test.ts** (6)
-
-- ✓ ICS parser > parses Windows TZIDs and converts to the target zone
-- ✓ ICS parser > converts UTC times and keeps tentative status
-- ✓ ICS parser > expands recurrences with EXDATE, moved and cancelled occurrences, limited to the period
-- ✓ ICS parser > flags cancelled and all-day events and filters out-of-period events
-- ✓ ICS parser > reports times in another zone when asked
-- ✓ ICS parser > rejects non-calendar files
-
-**tests/review.test.ts** (7)
-
-- ✓ overlaps > finds clusters and measures clock time
-- ✓ overlaps > splits overlap evenly
-- ✓ overlaps > blocks export until resolved or confirmed
-- ✓ validation > requires project, task, location, positive hours
-- ✓ validation > rejects tasks not configured for the project
-- ✓ validation > detects duplicates by fingerprint
-- ✓ merge > combines same date/project/task
 
 **tests/matching.test.ts** (8)
 
@@ -116,6 +135,49 @@ Used locally as the primary integration input; **it is not included in this ZIP,
 - ✓ matching > excludes cancelled, all-day, keyword and free events
 - ✓ matching > strips numeric prefixes
 - ✓ pipe titles that are not the convention > uses the only task when the second segment is not a task
+
+**tests/pdf.test.ts** (30)
+
+- ✓ time and date parsing > 9:30 AM → 570
+- ✓ time and date parsing > 12:00 PM → 720
+- ✓ time and date parsing > 12:30 AM → 30
+- ✓ time and date parsing > 1:30 PM → 810
+- ✓ time and date parsing > 11:50 AM → 710
+- ✓ time and date parsing > 13:45 → 825
+- ✓ time and date parsing > 9.30 a.m. → 570
+- ✓ time and date parsing > 0:00 → 0
+- ✓ time and date parsing > rejects nonsense
+- ✓ time and date parsing > dates
+- ✓ time and date parsing > redacts links, passcodes, phone numbers and e-mail addresses
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > spans several pages and reads the printed range
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > extracts every timed meeting with full titles, dates and exact times — and nothing else
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > computes durations from minutes (110 → 1.83, 105 → 1.75)
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > marks canceled meetings
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > collapses multi-day all-day events repeated under every day, keeps single all-day events
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > removes an identical meeting printed twice and reports it
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > splits a meeting that crosses midnight by work date
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > keeps organizer, location and client e-mail domains; drops the user's own domain
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > keeps a redacted source snippet for troubleshooting
+- ✓ Outlook Detailed agenda PDF (synthetic, multi-page) > does not depend on the order text items come out of the PDF
+- ✓ page boundaries and edge layouts (constructed pages) > joins a title at the bottom of one page with its time line at the top of the next
+- ✓ page boundaries and edge layouts (constructed pages) > handles an end time without AM/PM change, an end time past midnight without a second date, and 24-hour text
+- ✓ unsupported PDFs are rejected, never guessed > calendar-grid print
+- ✓ unsupported PDFs are rejected, never guessed > image-only PDF has no readable text
+- ✓ unsupported PDFs are rejected, never guessed > malformed file
+- ✓ PDF → matching → review → BigTime CSV > matches by convention, client name, organizer, e-mail domain and short names — never by your own company name
+- ✓ PDF → matching → review → BigTime CSV > excludes canceled, all-day and personal items by default
+- ✓ PDF → matching → review → BigTime CSV > flags the overlap and resolves it only by the user's choice
+- ✓ PDF → matching → review → BigTime CSV > exports the exact six-column CSV after review
+
+**tests/review.test.ts** (7)
+
+- ✓ overlaps > finds clusters and measures clock time
+- ✓ overlaps > splits overlap evenly
+- ✓ overlaps > blocks export until resolved or confirmed
+- ✓ validation > requires project, task, location, positive hours
+- ✓ validation > rejects tasks not configured for the project
+- ✓ validation > detects duplicates by fingerprint
+- ✓ merge > combines same date/project/task
 
 **tests/projector.test.ts** (19)
 
@@ -147,92 +209,18 @@ Used locally as the primary integration input; **it is not included in this ZIP,
 - ✓ BigTime CSV > names the file by period
 - ✓ BigTime CSV > encodes ANSI (Windows-1252)
 
-**tests/csv-calendar.test.ts** (3)
+**tests/excel.private.test.ts** (1)
 
-- ✓ Outlook CSV parser > reads the classic Outlook export
-- ✓ Outlook CSV parser > parses times and dates
-- ✓ Outlook CSV parser > supports generic Start/End columns
+- skipped: real Projector report (local only) > parses the report
 
-**tests/ocr.integration.test.ts** (5)
+**tests/ocr.integration.test.ts** (4)
 
 - ✓ OCR → Projector parser (real images) > reads a full project list
 - ✓ OCR → Projector parser (real images) > reads a dark-mode screenshot (after inversion the same data is found)
 - ✓ OCR → Projector parser (real images) > combines a multi-screenshot batch: continuation, overlap and merging
-- ✓ OCR limits and calendar screenshots (real images) > a small, blurry, compressed screenshot never yields a wrong 'valid' code
-- ✓ OCR limits and calendar screenshots (real images) > reads visible titles/times from an Outlook-style week view; no times are invented
+- ✓ OCR limits (real images) > a small, blurry, compressed screenshot never yields a wrong 'valid' code
 
-## Real OCR integration output (synthetic screenshots)
+**tests/pdf.private.test.ts** (1)
 
-```
-projector-list-1 → [{"client":"Acme Components","code":"P001234-001","status":"valid","tasks":["Planning","Gears","Bearings","Precision Parts"]},{"client":"Globex Corporation","code":"P005678-001","status":"valid","tasks":["Planning Consultant"]},{"client":"Smith-Jones Holdings","code":"P002468-002","status":"valid","tasks":["Consultant"]},{"client":"Our Firm","code":"P000999-001","status":"valid","tasks":["Internal - Meeting"]}]
-dark → [["P001234-001","valid",4],["P005678-001","valid",1],["P002468-002","valid",1],["P000999-001","valid",1]]
-batch → [["Acme Components","P001234-001","Planning; Gears; Bearings; Precision Parts"],["Globex Corporation","P005678-001","Planning Consultant"],["Smith-Jones Holdings","P002468-002","Consultant"],["Our Firm","P000999-001","Internal - Meeting"],["The Metro Public Library (MPL)","P007979-001","Planning"],["Initech","P003141-001","Support; Integration; Training"],["Umbrella Health","P008080-003","Planning"]] orphans → ["Internal - Training"]
-degraded → [["Acme Components","POG1223.001","ambiguous",["Banning","Goars","Barings"]],["Globex Curporution","","missing",["Planning Constant"]],["Sevth-Jones Holdings","PO02466-D02","ambiguous",["Consarant"]]]
-calendar → [["2026-11-02","Acme Components | Gears | Forecast model","09:00","10:30"],["2026-11-03","Initech planning review","13:00","14:15"],["2026-11-04","Umbrella Health workshop",null,null],["2026-11-02","Globex Corporation weekly sync",null,null]]
-```
+- skipped: real Outlook Detailed agenda PDF (local only) > parses every meeting cleanly
 
-## Excel onboarding end-to-end
-
-- PASS  Excel report is the default onboarding option
-- PASS  report parsed: 6 projects, 10 tasks
-- PASS  report date range from Options sheet shown
-- PASS  historical-report warning shown
-- PASS  most common work location preselected
-- PASS  default location taken from report
-- PASS  projects saved with exact codes/tasks; Role kept as metadata only — P001234-001:4 P005678-001:1 P007979-001:1 P002468-002:1 P000999-001:2 P003141-001:1
-- PASS  newer report added a project without removing saved ones — 7 projects
-- PASS  exported CSV: exact six columns, codes, tasks, per-project location, decimal hours — BigTime_Timesheet_2026-11-02_to_2026-11-08.csv
-- PASS  no requests to other hosts, no uploads — 10 same-origin GET requests
-- PASS  real report in the browser — Detected 6 projects and 9 tasks. 6 verified, 1 location option(s)
-- PASS  no page errors
-
-Exact CSV produced (fictional data):
-
-```
-Description,Location,Project,Task,Work Date,Work Hours
-Forecast model,Main Office,P001234-001,Gears,11/02/2026,3.25
-Globex Corporation weekly sync,Main Office,P005678-001,Planning Consultant,11/02/2026,0.75
-P002468-002 budget review,Remote,P002468-002,Consultant,11/03/2026,1.83
-Data load,Main Office,P004242-001,Integration,11/04/2026,1.00
-```
-
-(`Remote` comes from that project's own Work Location in the report; `Data load` belongs to a project added from a newer report in the Match step.)
-
-## Original workflow end-to-end
-
-- PASS  first visit shows onboarding wizard
-- PASS  browser OCR detects projects from 3 screenshots — Detected 7 projects and 12 tasks. in 2.8s
-- PASS  orphan task assigned to suggested project after confirmation
-- PASS  unknown meeting without a client hint is labelled clearly
-- PASS  all remaining work matched
-- PASS  overlap warning is specific — Two meetings overlap by 30 minutes
-- PASS  first-time CSV matches expected BigTime format exactly — BigTime_Timesheet_2026-11-02_to_2026-11-08.csv
-- PASS  setup success state shown — first-time workflow 5.526s (automated)
-- PASS  returning user skips setup
-- PASS  remembered match applied (only the excluded-before coffee chat needs a decision) — 1 group(s)
-- PASS  returning-user CSV identical — returning workflow 1.099s (automated)
-- PASS  ANSI export has same bytes for ASCII content
-- PASS  incremental import adds new project and merges tasks — 9 projects; Acme tasks: Planning, Gears, Bearings, Precision Parts, Training
-- PASS  v1 backup restores — [1,"Old Office"]
-- PASS  no requests to any other host — 25 same-origin requests
-- PASS  no uploads (no POST/PUT requests at all)
-- PASS  OCR engine loaded from this site — /tesseract/worker.min.js, /tesseract/core/tesseract-core-relaxedsimd-lstm.wasm.js, /tesseract/lang/eng.traineddata.gz
-- PASS  Content-Security-Policy restricts connections to this site
-- PASS  axe: no serious/critical WCAG A/AA violations on timesheet
-- PASS  axe: no serious/critical WCAG A/AA violations on projects
-- PASS  axe: no serious/critical WCAG A/AA violations on help
-- PASS  keyboard focus reaches navigation — Timesheet Converter
-- PASS  mobile #home: no horizontal scroll — scrollWidth 390
-- PASS  mobile #projects: no horizontal scroll — scrollWidth 390
-- PASS  mobile #help: no horizontal scroll — scrollWidth 390
-- PASS  no page errors
-
-## Remaining limitations
-
-- **A time-card report only lists what you've charged time to** in its date range and filters. New projects appear after you log time to them (or add them individually / from a newer report). The app warns about this and never invents projects or tasks.
-- **Client names** are split from project names using spaced separators and known product words (e.g. “Adaptive Planning”, “Implementation”, “MSP”). Unusual names are flagged for you to confirm; abbreviations people use in meeting titles (e.g. initials) aren't in the report, so the first time such a meeting appears you pick the project once and it's remembered (or suggested when the initials match).
-- **Report layout**: tested on your real report and synthetic variants (title rows, grouped rows, totals, reordered columns, `.xlsm`). A report missing the *Project* or *Task Name* column, or an old `.xls` file, is rejected with an explanation.
-- **Excel library**: `read-excel-file` (maintained, browser-native). The official SheetJS build is distributed from its own CDN, which wasn't reachable from this build environment, and the npm `xlsx` package is outdated with known vulnerabilities, so it wasn't used.
-- **Screenshot OCR** (projects or calendar) depends on image quality; uncertain values are flagged, never auto-corrected. Calendar screenshots only use times written in the image.
-- **Browser storage** is per device/browser; use backup/restore to move between computers.
-- **Vercel Drop** behaviour (creating a new project per drop; reusing the old `.vercel.app` name) couldn't be verified from this environment — see README.

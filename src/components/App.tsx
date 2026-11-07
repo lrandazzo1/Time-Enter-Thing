@@ -64,7 +64,7 @@ function Shell() {
               </a>
             ))}
           </nav>
-          <span className="privacy-pill" title="Calendar files, screenshots and projects are processed in this browser and never uploaded.">🔒 Runs on your device</span>
+          <span className="privacy-pill" title="Your calendar PDF, Projector report and projects are processed in this browser and never uploaded.">🔒 Runs on your device</span>
         </div>
       </header>
       <main className="container" id="main" tabIndex={-1}>
@@ -91,7 +91,7 @@ function Shell() {
       </main>
       <footer className="footer">
         <div className="container footer-inner">
-          <span>Free and private: calendar files, screenshots and projects are processed in this browser and never uploaded. Nothing is submitted to BigTime — you import the CSV yourself.</span>
+          <span>Free and private: your calendar PDF, Projector report and projects are processed in this browser and never uploaded. Nothing is submitted to BigTime — you import the CSV yourself.</span>
           <span>Check that your company allows using this tool with client information. Browser storage is specific to this device and browser and can be cleared — keep a backup.</span>
         </div>
       </footer>

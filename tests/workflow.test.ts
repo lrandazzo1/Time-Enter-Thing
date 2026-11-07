@@ -1,7 +1,5 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parsePastedEvents, parseTimeRange } from "@/lib/parsers/paste";
-import { parseIcs } from "@/lib/parsers/ics";
 import { eventToEntry, matchEvent, ruleKey, unknownClientHint } from "@/lib/matching";
 import { bestFuzzy, domainMatchesClient } from "@/lib/fuzzy";
 import { mergeProjects } from "@/lib/projectsCsv";
@@ -13,41 +11,9 @@ import { upsertRules } from "@/components/MatchStep";
 import type { CalendarEvent, ProjectMapping, TimeEntry } from "@/lib/types";
 import { period, projects, settings } from "./helpers";
 
-describe("pasted calendar events", () => {
-  it("parses day headings, inline dates and ranges; never invents times", () => {
-    const text = `Monday, November 2, 2026
-9:00 AM - 12:30 PM  Acme Corp | Planning | Model build
-1 - 2:15 PM Globex sync
-11/03/2026 10:00–11:50 Budget review
-Tuesday, November 3
-9:30 - 10:00
-Weekly status
-Untimed planning thoughts`;
-    const r = parsePastedEvents(text, period, settings);
-    expect(r.events.map((e) => [e.date, e.start, e.end, e.title])).toEqual([
-      ["2026-11-02", "09:00", "12:30", "Acme Corp | Planning | Model build"],
-      ["2026-11-02", "13:00", "14:15", "Globex sync"],
-      ["2026-11-03", "10:00", "11:50", "Budget review"],
-      ["2026-11-03", "09:30", "10:00", "Weekly status"],
-      ["2026-11-03", null, null, "Untimed planning thoughts"],
-    ]);
-    expect(r.events[4].minutes).toBeNull();
-  });
-  it("delegates header rows (Outlook list copy) to the CSV parser", () => {
-    const r = parsePastedEvents("Subject\tStart Date\tStart Time\tEnd Date\tEnd Time\nGlobex call\t11/3/2026\t9:00 AM\t11/3/2026\t10:30 AM", period, settings);
-    expect(r.format).toBe("table");
-    expect(r.events[0]).toMatchObject({ title: "Globex call", start: "09:00", end: "10:30", source: "paste" });
-  });
-  it("time ranges", () => {
-    expect(parseTimeRange("11:30 AM - 1 PM")).toMatchObject({ start: "11:30", end: "13:00" });
-    expect(parseTimeRange("9 - 10")).toBeNull();
-    expect(parseTimeRange("13:00-14:45")).toMatchObject({ start: "13:00", end: "14:45" });
-  });
-});
-
 const ev = (title: string, extra: Partial<CalendarEvent> = {}): CalendarEvent => ({
   title, description: "", location: "", date: "2026-11-02", start: "09:00", end: "10:00", minutes: 60,
-  allDay: false, canceled: false, status: "busy", recurring: false, source: "ics", ...extra,
+  allDay: false, canceled: false, status: "busy", recurring: false, source: "pdf", ...extra,
 });
 
 describe("matching priority", () => {
@@ -105,16 +71,6 @@ describe("matching priority", () => {
   });
 });
 
-describe("ICS recurring, canceled and organizer domains", () => {
-  it("still expands the Outlook fixture and drops the user's own domain", () => {
-    const ics = readFileSync("tests/fixtures/outlook-week.ics", "utf8");
-    const { events } = parseIcs(ics, period, "America/Chicago");
-    expect(events.filter((e) => e.title === "Daily internal standup")).toHaveLength(4);
-    const withOrg = parseIcs(readFileSync("tests/fixtures/e2e-week.ics", "utf8"), period, "America/Chicago").events;
-    expect(withOrg.find((e) => e.title.startsWith("Globex"))?.domains).toEqual(["globex.example"]);
-  });
-});
-
 describe("project configuration", () => {
   it("imports incrementally without losing existing settings", () => {
     const incoming: ProjectMapping[] = [
@@ -149,7 +105,7 @@ describe("project configuration", () => {
     expect(csv.split("\r\n")[1]).toBe(`'=HYPERLINK(1),'@x,'=cmd|' /C calc'!A0,Planning,11/02/2026,1.00`);
   });
   it("remembers confirmed matches by title", () => {
-    const e: TimeEntry = { id: "1", source: "ics", title: "Budget model revenue planning", date: "2026-11-02", intervals: [], minutes: 60, projectId: "acme", task: "Planning", description: "", location: "", included: true, status: "busy", notes: [] };
+    const e: TimeEntry = { id: "1", source: "pdf", title: "Budget model revenue planning", date: "2026-11-02", intervals: [], minutes: 60, projectId: "acme", task: "Planning", description: "", location: "", included: true, status: "busy", notes: [] };
     const r = upsertRules([], [e, { ...e, id: "2" }]);
     expect(r).toHaveLength(1);
     expect(r[0]).toMatchObject({ key: "budget model revenue planning", projectId: "acme" });
@@ -170,7 +126,7 @@ describe("regression: Nov 2–6 week (synthetic replica)", () => {
     P("qb", "Lumen Labs", "P100005-001", ["Planning Consultant"]),
     P("in", "Our Firm Internal", "P100006-001", ["Internal - Meeting", "Internal - Training"], false, ["INTERNAL"]),
   ];
-  const T = (date: string, s: string, e: string, title: string, status: CalendarEvent["status"] = "busy", canceled = false): CalendarEvent => ({ title, description: "", location: "", date, start: s, end: e, minutes: null, allDay: false, canceled, status: canceled ? "free" : status, recurring: false, source: "ics" });
+  const T = (date: string, s: string, e: string, title: string, status: CalendarEvent["status"] = "busy", canceled = false): CalendarEvent => ({ title, description: "", location: "", date, start: s, end: e, minutes: null, allDay: false, canceled, status: canceled ? "free" : status, recurring: false, source: "pdf" });
   const events = [
     T("2026-11-02", "10:00", "11:00", "Canceled: Lumen Labs | Our Firm Support Working Session", "busy", true),
     T("2026-11-02", "12:30", "13:00", "INTERNAL - Pat + Sam"),

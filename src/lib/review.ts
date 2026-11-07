@@ -88,6 +88,25 @@ export function splitOverlapEvenly(entries: TimeEntry[], cluster: OverlapCluster
   return result;
 }
 
+/**
+ * "Keep meeting A": A keeps its time; every other meeting in the cluster loses the minutes that
+ * overlap A (never below zero). The user decides; nothing is chosen automatically.
+ */
+export function keepOneInOverlap(entries: TimeEntry[], cluster: OverlapCluster, keepId: string): Record<string, number> {
+  const keep = entries.find((e) => e.id === keepId);
+  const out: Record<string, number> = {};
+  if (!keep) return out;
+  for (const e of entries) {
+    if (e.id === keepId || !cluster.entryIds.includes(e.id)) continue;
+    let overlap = 0;
+    for (const a of e.intervals) for (const b of keep.intervals) {
+      overlap += Math.max(0, Math.min(toMinutes(a.end), toMinutes(b.end)) - Math.max(toMinutes(a.start), toMinutes(b.start)));
+    }
+    out[e.id] = Math.max(0, e.minutes - overlap);
+  }
+  return out;
+}
+
 export interface MergeOutcome {
   entries: TimeEntry[];
   merged: number;
