@@ -140,6 +140,20 @@ check("pdf.js worker served from this site", requests.some((r) => r.url().includ
 const csp = (await (await fetch(BASE)).headers.get("content-security-policy")) ?? "";
 check("CSP restricts connections to this site", /connect-src 'self'/.test(csp));
 
+/* ---------- Help: Projector report tutorial ---------- */
+await page.goto(BASE + "/#help");
+await page.getByRole("heading", { name: "First-Time Setup: Import Your Projects from Projector" }).waitFor();
+await page.getByRole("button", { name: "Expand all steps" }).click();
+const stepTitles = await page.locator(".tut-step > summary").allInnerTexts();
+const imgs = await page.evaluate(() => [...document.querySelectorAll(".tut-step img")].map((i) => ({ src: i.getAttribute("src"), ok: i.complete && i.naturalWidth > 0 })));
+await page.waitForFunction(() => [...document.querySelectorAll(".tut-step img")].every((i) => i.complete && i.naturalWidth > 0));
+const helpText = await page.locator("main, body").first().innerText();
+check("Help: six Projector tutorial steps with screenshots, current workflow only", stepTitles.length === 6 && imgs.length >= 12 && /Detailed agenda/.test(helpText) && !/\.ics|Anthropic|publish/i.test(helpText), `${stepTitles.length} steps, ${imgs.length} images`);
+await page.locator(".tut-step img").first().click();
+await page.getByRole("dialog").waitFor();
+await page.keyboard.press("Escape");
+check("Help: screenshots open enlarged and close", (await page.getByRole("dialog").count()) === 0);
+
 /* ---------- accessibility & mobile ---------- */
 const axeSrc = readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
 for (const hash of ["#home", "#projects", "#help"]) {

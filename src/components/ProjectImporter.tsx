@@ -198,7 +198,7 @@ function ExcelImport({ onReport, onError }: { onReport: (r: ProjectorReport, fil
   }
   return (
     <Card title="Upload your Projector Excel report" subtitle="The original .xlsx downloaded from Projector — don't open, convert or edit it. It's read in this browser only; nothing is uploaded.">
-      <Dropzone accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" onFiles={take} label={busy ? "Reading report…" : <><strong>Drop the Projector report (.xlsx)</strong> or click to choose</>} hint="Needs the columns Project and Task Name (Work Location and Role are optional). Macros are never run." icon="📊" />
+      <Dropzone accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" onFiles={take} label={busy ? "Reading report…" : <><strong>Drop the Projector report (.xlsx)</strong> or click to choose</>} hint="Needs the columns Project and Task Name (Work Location, Role and Resource Display Name are optional). Macros are never run." icon="📊" />
       {pending && (
         <div className="editor mt">
           <label className="field narrow">
@@ -216,7 +216,7 @@ function ExcelImport({ onReport, onError }: { onReport: (r: ProjectorReport, fil
       )}
       <details className="help">
         <summary>Which report should I download?</summary>
-        <p className="small">A Projector <strong>Time Card Report</strong> filtered to yourself, with the columns <em>Project</em>, <em>Role</em>, <em>Work Location</em> and <em>Task Name</em>, covering a recent period long enough to include every project you work on (e.g. the last 3–6 months). Export it to Excel and upload the file as-is. See Help for step-by-step instructions.</p>
+        <p className="small">A Projector <strong>Time Card Report</strong> filtered to yourself, with the columns <em>Project</em>, <em>Role</em>, <em>Work Location</em>, <em>Task Name</em> and (optional) <em>Resource Display Name</em>, covering a recent period long enough to include every project you work on (e.g. the last 3–6 months). Export it to Excel and upload the file as-is. See Help for step-by-step instructions.</p>
       </details>
     </Card>
   );

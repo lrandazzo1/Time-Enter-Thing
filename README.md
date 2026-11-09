@@ -1,4 +1,4 @@
-# Timesheet Converter 2.2
+# Timesheet Converter 2.2.2
 
 Turn your Outlook calendar into a reviewed, import-ready **BigTime Enterprise PSA** (formerly Projector PSA) timesheet CSV — free, private, and without any AI service.
 
@@ -21,13 +21,15 @@ Everything runs in the browser.
 
 A **Time Card Report** from Projector, exported to **Excel** and uploaded unchanged:
 
-1. Projector → **Reports** → **Time Card Report** (save it, e.g. as “Timesheet Converter”, to reuse it).
-2. Columns: **Project**, **Task Name**, **Work Location** (and optionally **Role**). Other columns are ignored.
-3. Filter to **yourself** (resource filter / resource search string).
-4. Date range: long enough to include every project you work on — the last **3–6 months** is a good default.
-5. Export → Excel, then in Timesheet Converter: **Projects → Import projects → Upload Projector Excel report** (or the first step of the setup wizard).
+The in-app **Help** page has an illustrated step-by-step version of this.
 
-The importer uses the `Report` sheet (or any sheet with *Project* and *Task Name* columns), takes the project code from the final parentheses in the Project column (`Globex - Adaptive Planning - MSP (P005678-001)` → `P005678-001`), keeps task names exactly, suggests the location from *Work Location*, keeps *Role* only as reference, and shows the date range and filters from the `Options` sheet. A time card report is history, not an assignment list: projects you haven't charged time to in the date range won't be in it — upload a newer report later (also possible from the Match step) and new projects/tasks are merged into what's saved. `.xlsx` and `.xlsm` are read as data only; macros are never run. Menu names can vary slightly between Projector versions.
+1. Projector → **Reports** → **Create New Report** → **Time Card Report**.
+2. **Data Fields**: **Project**, **Role**, **Work Location**, **Task Name**, and optionally **Resource Display Name**. Other columns are ignored.
+3. **Parameters**: a **Time Period** long enough to include every project you work on (e.g. last quarter), and your own name as the **Resource Search String**. Check the time card statuses (Approved is a good default).
+4. **Save As** (e.g. “My Timesheet Projects”) → **Submit** → back on Reports select it → **Run**.
+5. In **Report Output** select the completed report → **Save as XLSX (New)**, then in Timesheet Converter: **Projects → Import projects → Upload Projector Excel report** (or the first step of the setup wizard).
+
+The importer uses the `Report` sheet (or any sheet with *Project* and *Task Name* columns), takes the project code from the final parentheses in the Project column (`Globex - Adaptive Planning - MSP (P005678-001)` → `P005678-001`), keeps task names exactly, suggests the location from *Work Location*, keeps *Role* only as reference, uses *Resource Display Name* (if present) only to let you pick yourself when a report contains several people, and shows the date range and filters from the `Options` sheet. A time card report is history, not an assignment list: projects you haven't charged time to in the date range won't be in it — upload a newer report later (also possible from the Match step) and new projects/tasks are merged into what's saved. `.xlsx` and `.xlsm` are read as data only; macros are never run. Menu names can vary slightly between Projector versions.
 
 There is no server-side code, no database, no account, no API key and no environment variable. Calendar PDFs, Projector reports and screenshots never leave the device: the pdf.js worker is served from this site's own `/pdfjs/` folder, project-screenshot OCR uses open-source [Tesseract.js](https://github.com/naptha/tesseract.js) from `/tesseract/`, and the site's Content-Security-Policy (`connect-src 'self'`) blocks the page from sending data to any other server.
 

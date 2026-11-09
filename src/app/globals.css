@@ -228,6 +228,9 @@ pre.raw { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: var
 .hl-bad { border-color: #d92d20; box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.15); }
 .hl-label { position: absolute; top: -1px; left: -1px; transform: translateY(-100%); background: #2f5bea; color: #fff; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px 4px 4px 0; white-space: nowrap; }
 .hl-bad .hl-label { background: #d92d20; }
+.hl-below .hl-label { top: auto; bottom: -1px; transform: translateY(100%); border-radius: 0 4px 4px 4px; }
+.hl-right .hl-label { left: auto; right: -1px; border-radius: 4px 4px 0 4px; }
+.hl-right.hl-below .hl-label { border-radius: 4px 0 4px 4px; }
 .zoom-hint { position: absolute; bottom: 6px; right: 6px; background: rgba(15, 23, 42, 0.75); color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 4px; }
 .lightbox { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.82); z-index: 100; display: flex; flex-direction: column; }
 .lightbox-bar { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 10px; color: #fff; flex-wrap: wrap; }
@@ -366,6 +369,32 @@ kbd { font-family: var(--mono); font-size: 0.8em; border: 1px solid var(--border
 .toc a:hover { border-color: var(--accent); color: var(--accent); }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 12px; }
 .anchor-target { display: block; position: relative; top: -80px; visibility: hidden; }
+
+/* Help: how it works + step-by-step tutorial */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 14px; padding: 0; list-style: none; }
+.flow li { background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; font-size: 0.88rem; font-weight: 600; color: var(--text-2); }
+.flow li.flow-sep { background: none; border: 0; padding: 0; color: var(--muted); font-weight: 400; }
+.tutorial { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.tut-step { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.tut-step[open] { border-color: var(--border-strong); }
+.tut-step > summary { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; list-style: none; font-weight: 650; }
+.tut-step > summary::-webkit-details-marker { display: none; }
+.tut-step > summary::after { content: "▸"; margin-left: auto; color: var(--muted); transition: transform 0.15s; }
+.tut-step[open] > summary::after { transform: rotate(90deg); }
+.tut-step > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius); }
+.tut-num { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 0.9rem; }
+.tut-sub { font-weight: 400; color: var(--muted); font-size: 0.86rem; }
+.tut-body { padding: 0 14px 14px 54px; }
+.tut-body > * + * { margin-top: 10px; }
+.tut-body .guide-figure { margin-top: 14px; }
+.tut-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.field-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.field-list li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.field-list code { min-width: 170px; }
+@media (max-width: 720px) {
+  .tut-body { padding: 0 12px 12px; }
+  .field-list code { min-width: 0; }
+}
 
 @media (max-width: 980px) {
   .method-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.2 — Help page: Projector report tutorial
+
+### Changed
+- **Help** now starts with **How it works** (Projector Excel → Outlook Detailed agenda PDF → Review hours → Download CSV → Import into Projector) and a reminder that calendar time is scheduled, not verified.
+- New **First-Time Setup: Import Your Projects from Projector**: six collapsible steps (open Reports → data fields → parameters → save and run → Save as XLSX → upload and confirm), each with real Projector screenshots (names and report titles blurred), highlighted buttons and settings, click-to-zoom, *Next step* buttons and *Expand/Collapse all*.
+- Outlook section reduced to the six Detailed agenda steps with why the grid PDF doesn't work; new **Review your hours** and **Resolving Projector import errors** sections. Copy-text/screenshot project import moved to a collapsed *Other ways to add projects* section. The BigTime import, field mapping, date/hours formats, saved “CSV Mapping” and Role/Rate instructions and screenshots are kept.
+- The Excel importer recognises **Resource Display Name** as the person column (ignored for projects/tasks; if a report contains several people you're asked to choose yourself).
+
 ## 2.2.1 — Project names on the export preview
 
 ### Changed

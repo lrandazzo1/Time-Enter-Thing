@@ -88,6 +88,22 @@ describe("other report layouts", () => {
     await expect(load("not-a-report.xlsx").then(parseProjectorReport)).rejects.toThrow(/Project/);
     await expect(readWorkbook(new TextEncoder().encode("not a zip").buffer)).rejects.toThrow(/Couldn't read/);
   });
+  it("accepts the recommended five-column report (optional Resource Display Name) with the same result", async () => {
+    const base = parseProjectorReport(await load("projector-report.xlsx"));
+    const five = parseProjectorReport(await load("projector-report-resource.xlsx"));
+    expect(five.columns).toMatchObject({ project: "Project", task: "Task Name", location: "Work Location", role: "Role", employee: "Resource Display Name" });
+    expect(five.projects.map((p) => [p.code, p.fullName, p.client, p.tasks.map((t) => t.name), p.location])).toEqual(base.projects.map((p) => [p.code, p.fullName, p.client, p.tasks.map((t) => t.name), p.location]));
+    expect(five.employees).toEqual(["Jane Smith"]);
+    expect(five.warnings.join(" ")).not.toMatch(/people/);
+    for (const p of five.projects) expect(p.tasks.map((t) => t.name)).not.toContain("Jane Smith");
+  });
+  it("Resource Display Name with two similar names asks which person to import", () => {
+    const sheets = [{ sheet: "Report", data: [["Project", "Role", "Work Location", "Task Name", "Resource Display Name"], ["Acme - Support (P000100-001)", "Consultant", "Main Office", "Support", "Jane Smith"], ["Globex - MSP (P000200-001)", "Consultant", "Main Office", "Planning", "Jane Smithers"]] }];
+    const all = parseProjectorReport(sheets);
+    expect(all.employees).toEqual(["Jane Smith", "Jane Smithers"]);
+    expect(all.warnings.join(" ")).toMatch(/2 people/);
+    expect(parseProjectorReport(sheets, { employee: "Jane Smith" }).projects.map((p) => p.code)).toEqual(["P000100-001"]);
+  });
   it("offers an employee filter only when the report has an employee column", () => {
     const sheets = [{ sheet: "Report", data: [["Staff", "Project", "Task Name"], ["Pat", "Acme - Support (P000100-001)", "Support"], ["Sam", "Globex - MSP (P000200-001)", "Consultant"]] }];
     const all = parseProjectorReport(sheets);

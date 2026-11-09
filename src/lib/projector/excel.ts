@@ -64,7 +64,7 @@ const HEADER_MATCH: Record<keyof ReportColumns, (h: string) => boolean> = {
   location: (h) => ["worklocation", "location", "timelocation"].includes(h),
   role: (h) => ["role", "rolename", "staffrole", "projectrole"].includes(h),
   code: (h) => ["projectcode", "projectid", "projectnumber", "code"].includes(h),
-  employee: (h) => ["staff", "staffmember", "staffname", "employee", "employeename", "resource", "resourcename", "user", "username", "person", "timekeeper"].includes(h),
+  employee: (h) => ["staff", "staffmember", "staffname", "employee", "employeename", "resource", "resourcename", "resourcedisplayname", "displayname", "user", "username", "person", "timekeeper"].includes(h),
 };
 
 /** Find the header row: the first row (within the top 40) that has both a Project and a Task column. */

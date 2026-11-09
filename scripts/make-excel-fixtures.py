@@ -79,3 +79,19 @@ wb.active.title = "Budget"
 wb.active.append(["Account", "Jan", "Feb"])
 wb.save(OUT + "not-a-report.xlsx")
 print("written")
+
+# 5. The recommended report: Project | Role | Work Location | Task Name | Resource Display Name
+#    (the optional fifth column identifies whose time cards are included).
+def make_with_resource():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Report"
+    ws.append(["Project", "Role", "Work Location", "Task Name", "Resource Display Name"])
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for r in ROWS:
+        ws.append(list(r) + ["Jane Smith"])
+    options(wb.create_sheet("Options"))
+    wb.save(OUT + "projector-report-resource.xlsx")
+
+make_with_resource()

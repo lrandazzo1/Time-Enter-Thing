@@ -9,13 +9,16 @@ export interface Highlight {
   height: number;
   label?: string;
   tone?: "good" | "bad";
+  /** Where the label sits: above (default) or below the box, aligned to its left (default) or right edge. */
+  labelBelow?: boolean;
+  labelRight?: boolean;
 }
 
-export function GuideFigure({ src, alt, caption, width, height, highlights = [] }: { src: string; alt: string; caption: React.ReactNode; width: number; height: number; highlights?: Highlight[] }) {
+export function GuideFigure({ src, alt, caption, width, height, highlights = [], maxWidth = 640 }: { src: string; alt: string; caption: React.ReactNode; width: number; height: number; highlights?: Highlight[]; maxWidth?: number }) {
   const [open, setOpen] = useState(false);
   return (
     <figure className="guide-figure">
-      <button className="figure-frame" style={{ maxWidth: Math.min(640, width) }} onClick={() => setOpen(true)} aria-label={`Enlarge: ${alt}`}>
+      <button className="figure-frame" style={{ maxWidth: Math.min(maxWidth, width) }} onClick={() => setOpen(true)} aria-label={`Enlarge: ${alt}`}>
         <Annotated src={src} alt={alt} width={width} height={height} highlights={highlights} />
         <span className="zoom-hint">🔍 Click to zoom</span>
       </button>
@@ -31,7 +34,7 @@ function Annotated({ src, alt, width, height, highlights, scale }: { src: string
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} width={width} height={height} draggable={false} />
       {highlights.map((h, i) => (
-        <span key={i} className={`hl hl-${h.tone ?? "good"}`} style={{ left: `${h.left}%`, top: `${h.top}%`, width: `${h.width}%`, height: `${h.height}%` }}>
+        <span key={i} className={`hl hl-${h.tone ?? "good"}${h.labelBelow ? " hl-below" : ""}${h.labelRight ? " hl-right" : ""}`} style={{ left: `${h.left}%`, top: `${h.top}%`, width: `${h.width}%`, height: `${h.height}%` }}>
           {h.label && <span className="hl-label">{h.label}</span>}
         </span>
       ))}

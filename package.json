@@ -1,6 +1,6 @@
 {
   "name": "timesheet-converter",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "private": true,
   "scripts": {
     "dev": "node scripts/copy-assets.mjs && next dev",
