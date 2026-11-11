@@ -7,9 +7,11 @@ import { EXPORTERS, buildCsv, buildPreview, getExporter } from "@/lib/exporters"
 import { encodeCsv, type CsvEncoding } from "@/lib/exporters/csv";
 import { reviewSummaryMarkdown } from "@/lib/summary";
 import { formatDecimalHours, toUSDate } from "@/lib/time";
+import { pageRanges } from "@/lib/pdf/ocrRun";
 
 export function ExportStep({ onBack, onGuide, onExported }: { onBack: () => void; onGuide: () => void; onExported?: () => void }) {
-  const { entries, setEntries, projects, settings, period } = useStore();
+  const { entries, setEntries, projects, settings, period, lastImport, setLastImport } = useStore();
+  const inc = lastImport?.incomplete && !lastImport.incomplete.acknowledged ? lastImport.incomplete : null;
   const [exporterId, setExporterId] = useState(EXPORTERS[0].id);
   const [encoding, setEncoding] = useState<CsvEncoding>("utf-8");
   const [confirmed, setConfirmed] = useState(false);
@@ -19,7 +21,8 @@ export function ExportStep({ onBack, onGuide, onExported }: { onBack: () => void
 
   const issues = useMemo(() => [...validate(entries, ctx), ...exporter.validate(entries, ctx)], [entries, projects, settings, period, exporter]); // eslint-disable-line react-hooks/exhaustive-deps
   const unapproved = entries.filter((e) => e.included && !e.confirmed);
-  const errors = [...issues.filter((i) => i.level === "error"), ...(unapproved.length ? [{ level: "error" as const, code: "unapproved", message: `${unapproved.length} included entr${unapproved.length === 1 ? "y hasn't" : "ies haven't"} been approved yet. Approve each line in Review once you've checked it against the time you actually worked.` }] : [])];
+  const incompleteIssue = inc ? [{ level: "error" as const, code: "incomplete-import", message: `The calendar import is incomplete: page${inc.missingPages.length === 1 ? "" : "s"} ${pageRanges(inc.missingPages)} of ${inc.totalPages} ${inc.missingPages.length === 1 ? "wasn't" : "weren't"} read, so meetings on ${inc.missingPages.length === 1 ? "it are" : "them are"} missing. Read the remaining pages in step 1 (Retry remaining pages), or add that time yourself and confirm below.` }] : [];
+  const errors = [...incompleteIssue, ...issues.filter((i) => i.level === "error"), ...(unapproved.length ? [{ level: "error" as const, code: "unapproved", message: `${unapproved.length} included entr${unapproved.length === 1 ? "y hasn't" : "ies haven't"} been approved yet. Approve each line in Review once you've checked it against the time you actually worked.` }] : [])];
   const warnings = issues.filter((i) => i.level === "warning");
   const csv = useMemo(() => buildCsv(exporter, entries, ctx), [exporter, entries, projects, settings, period]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = exporter.rows(entries, ctx);
@@ -66,6 +69,13 @@ export function ExportStep({ onBack, onGuide, onExported }: { onBack: () => void
           </ul>
           <div className="row wrap gap-sm mt">
             <Button size="sm" onClick={onBack}>← Back to review</Button>
+            {inc && lastImport && (
+              <Button size="sm" onClick={() => {
+                if (window.confirm(`Pages ${pageRanges(inc.missingPages)} of the calendar PDF were not read. Confirm only if you have added the time from those pages yourself (or there was none).`)) {
+                  setLastImport({ ...lastImport, incomplete: { ...inc, acknowledged: true } });
+                }
+              }}>I added the missing pages&apos; time myself</Button>
+            )}
             {unapproved.length > 0 && errors.length === 1 && !unapproved.some((e) => e.notes.some((n) => n.code === "pdf-check")) && (
               <Button size="sm" variant="primary" onClick={() => {
                 if (window.confirm(`Approve all ${unapproved.length} remaining entries? Only do this if you have checked every line against the time you actually worked.`)) {

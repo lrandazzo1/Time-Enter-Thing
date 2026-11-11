@@ -1,4 +1,10 @@
 /** Engine-independent OCR output used by the parsers. */
+export interface OcrWord {
+  text: string;
+  x0: number;
+  x1: number;
+}
+
 export interface OcrLine {
   text: string;
   confidence: number;
@@ -6,6 +12,8 @@ export interface OcrLine {
   y0: number;
   x1: number;
   y1: number;
+  /** Word boxes (x only), when the engine provides them. */
+  words?: OcrWord[];
 }
 
 export interface OcrPage {
@@ -20,7 +28,7 @@ export interface OcrPage {
 interface TessLike {
   text?: string;
   confidence?: number;
-  blocks?: { paragraphs: { lines: { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } }[] }[] }[] | null;
+  blocks?: { paragraphs: { lines: { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number }; words?: { text: string; bbox: { x0: number; x1: number } }[] }[] }[] }[] | null;
 }
 
 /** Convert a Tesseract.js page result to OcrPage (coordinates divided by `scale` to match the original image). */
@@ -31,7 +39,8 @@ export function fromTesseract(label: string, data: TessLike, width: number, heig
       for (const l of p.lines) {
         const text = l.text.replace(/\s+$/g, "").replace(/\n/g, " ");
         if (!text.trim()) continue;
-        lines.push({ text, confidence: l.confidence, x0: l.bbox.x0 / scale, y0: l.bbox.y0 / scale, x1: l.bbox.x1 / scale, y1: l.bbox.y1 / scale });
+        const words = l.words?.filter((w) => w.text.trim()).map((w) => ({ text: w.text.trim(), x0: w.bbox.x0 / scale, x1: w.bbox.x1 / scale }));
+        lines.push({ text, confidence: l.confidence, x0: l.bbox.x0 / scale, y0: l.bbox.y0 / scale, x1: l.bbox.x1 / scale, y1: l.bbox.y1 / scale, ...(words?.length ? { words } : {}) });
       }
     }
   }

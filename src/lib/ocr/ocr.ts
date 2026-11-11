@@ -1,6 +1,6 @@
 "use client";
 import { fromTesseract, type OcrPage } from "./types";
-import { preprocessImage } from "./preprocess";
+import { preprocessCanvas, preprocessImage } from "./preprocess";
 
 /**
  * Local, in-browser OCR with Tesseract.js.
@@ -66,3 +66,49 @@ export async function ocrImages(files: File[], opts: { mode: OcrMode; onProgress
   }
   return pages;
 }
+
+export interface OcrWorker {
+  /** Recognise one canvas (it is enhanced into a copy; the caller releases the original). */
+  recognizeCanvas(canvas: HTMLCanvasElement, label: string): Promise<OcrPage>;
+  terminate(): Promise<void>;
+}
+
+/**
+ * One reusable recognition worker (the engine loads once; pages are fed to it one at a time).
+ * `onProgress` receives Tesseract's status and 0–1 progress for the current image.
+ */
+export async function createOcrWorker(mode: OcrMode, onProgress?: (status: string, progress: number) => void): Promise<OcrWorker> {
+  const { createWorker, OEM, PSM } = await import("tesseract.js");
+  const base = assetBase();
+  onProgress?.("Loading the text-recognition engine (first time only, ~11 MB)…", 0);
+  const worker = await createWorker("eng", OEM.LSTM_ONLY, {
+    workerPath: `${base}/worker.min.js`,
+    corePath: `${base}/core`,
+    langPath: `${base}/lang`,
+    gzip: true,
+    workerBlobURL: false,
+    cacheMethod: "write",
+    logger: (m: { status: string; progress: number }) => onProgress?.(m.status === "recognizing text" ? "Reading text…" : m.status.replace(/^./, (c) => c.toUpperCase()), m.progress),
+    errorHandler: () => {},
+  });
+  await worker.setParameters({
+    tessedit_pageseg_mode: mode === "calendar" ? PSM.SPARSE_TEXT : PSM.AUTO,
+    preserve_interword_spaces: "1",
+    user_defined_dpi: "300",
+  });
+  return {
+    async recognizeCanvas(canvas, label) {
+      const prepared = preprocessCanvas(canvas);
+      try {
+        const { data } = await worker.recognize(prepared.canvas, {}, { blocks: true, text: true });
+        return fromTesseract(label, data, prepared.width, prepared.height, prepared.scale);
+      } finally {
+        prepared.canvas.width = prepared.canvas.height = 0; // release memory
+      }
+    },
+    async terminate() {
+      await worker.terminate().catch(() => {});
+    },
+  };
+}
+

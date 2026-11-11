@@ -217,7 +217,58 @@ await mp.screenshot({ path: path.join(OUT, "pdf-mobile-review.png"), fullPage: f
   const checks = await p3.locator(".extract-table .badge", { hasText: "Check" }).count();
   check("image-only PDF read with on-device text recognition; every meeting flagged", checks === 3 && (await p3.getByText("Read with on-device text recognition").count()) === 1, `${(Date.now() - tOcr) / 1000}s, ${checks} flagged`);
   await p3.screenshot({ path: path.join(OUT, "pdf-06-ocr.png"), fullPage: true });
+
+  // 24 image-only pages (more than the old 20-page cap): progress, cancel part-way, incomplete import is
+  // flagged and blocks export, then retry only the remaining pages.
+  await again();
+  await input.setInputFiles(path.join(FIX, "pdf", "variant-image-long.pdf"));
+  await p3.getByRole("button", { name: "Read with text recognition" }).click();
+  await p3.getByText("Processing page 5 of 24").waitFor({ timeout: 120000 });
+  const live = await p3.locator(".ocr-progress").innerText();
+  const bar = await p3.locator(".ocr-progress progress").count();
+  await p3.screenshot({ path: path.join(OUT, "pdf-07-ocr-progress.png") });
+  await p3.getByRole("button", { name: "Cancel" }).click();
+  await p3.getByText(/Incomplete import: pages \d+–24 of 24 weren't read/).first().waitFor();
+  const partialCount = Number(/Meetings to review \((\d+)\)/.exec(await p3.locator("body").innerText())?.[1]);
+  check("long image-only PDF: live 'Processing page N of 24', progress bar, meeting count; cancel keeps pages read and marks the import incomplete", bar === 1 && /meetings? identified so far/.test(live) && partialCount >= 3 && partialCount < 24, `${live.split("\n")[0]} · ${partialCount} meetings kept`);
+  await p3.getByRole("button", { name: "Match projects →" }).click();
+  await p3.getByRole("button", { name: /^Review hours.*→$/ }).click();
+  const reviewBanner = await p3.getByText(/Incomplete calendar import — pages \d+–24 of 24 not read/).count();
+  await p3.getByRole("button", { name: /Continue to export/ }).click();
+  await p3.getByText(/The calendar import is incomplete: pages \d+–24 of 24 weren't read/).waitFor();
+  check("incomplete import is flagged in Review and blocks the CSV download", reviewBanner === 1 && (await p3.getByRole("button", { name: /^Download BigTime_Timesheet/ }).isDisabled()));
+  await p3.getByRole("button", { name: /Upload calendar PDF/ }).first().click();
+  await p3.getByRole("button", { name: "Retry remaining pages" }).first().click();
+  await p3.getByText(/Processing page 2[1-4] of 24/).waitFor({ timeout: 180000 });
+  await p3.getByText("Meetings to review (24)").waitFor({ timeout: 300000 });
+  const stats3 = (await p3.locator(".summary-grid").innerText()).replace(/\s+/g, " ");
+  check("retry reads only the remaining pages; all 24 pages and 24 meetings, no duplicates, no longer incomplete", /24 PDF pages/.test(stats3) && (await p3.getByText(/Incomplete import/).count()) === 0, stats3.slice(0, 60));
   await c3.close();
+}
+
+/* ---------- optional: a real image-only agenda PDF read page by page (never stored) ---------- */
+const ocrPdf = process.env.PRIVATE_OCR_PDF;
+if (ocrPdf && existsSync(ocrPdf)) {
+  const c4 = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+  const p4 = await c4.newPage();
+  p4.on("pageerror", (e) => errors.push(e.message));
+  await p4.goto(BASE);
+  await p4.evaluate(() => localStorage.setItem("tsc.v1.settings", JSON.stringify({ onboarding: "done" })));
+  await p4.reload();
+  await p4.locator('input[type=file][accept*=".pdf"]').setInputFiles(ocrPdf);
+  await p4.getByRole("button", { name: "Read with text recognition" }).click();
+  const t4 = Date.now();
+  await p4.getByText(/Processing page 21 of \d+/).waitFor({ timeout: 600000 });
+  const at21 = (await p4.locator(".ocr-progress").innerText()).replace(/\s+/g, " ");
+  await p4.getByText(/Meetings to review \(\d+\)/).waitFor({ timeout: 900000 });
+  const s4 = (await p4.locator(".summary-grid").innerText()).replace(/\s+/g, " ");
+  const pagesSeen = await p4.evaluate(() => {
+    const d = JSON.parse(localStorage.getItem("tsc.v1.draft") || "{}");
+    return [...new Set((d.entries || []).filter((e) => e.source === "pdf").map((e) => Number(/page (\d+)/.exec(e.sourceLabel || "")?.[1])))].sort((a, b) => a - b);
+  });
+  const late = pagesSeen.filter((n) => n >= 21);
+  check("real image-only PDF: every page read, meetings from pages 21+ included, not incomplete", (await p4.getByText(/Incomplete import/).count()) === 0 && late.length > 0, `${Math.round((Date.now() - t4) / 1000)}s · at page 21: "${at21.slice(0, 80)}" · ${s4.slice(0, 70)} · meeting pages ≥21: ${late.join(",")}`);
+  await c4.close();
 }
 
 /* ---------- optional real files (never stored) ---------- */

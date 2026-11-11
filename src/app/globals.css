@@ -465,3 +465,7 @@ details.source pre { white-space: pre-wrap; background: var(--surface-2); border
 .diag-table td { padding: 3px 0; overflow-wrap: anywhere; }
 .diag-shapes { font-size: 0.75rem; max-height: 220px; overflow: auto; white-space: pre; }
 @media (max-width: 720px) { .diag-table th { white-space: normal; } }
+
+/* Text recognition progress */
+.ocr-progress { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
+.ocr-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }

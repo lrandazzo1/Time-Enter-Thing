@@ -1,4 +1,4 @@
-# Timesheet Converter 2.2.3
+# Timesheet Converter 2.2.4
 
 Turn your Outlook calendar into a reviewed, import-ready **BigTime Enterprise PSA** (formerly Projector PSA) timesheet CSV — free, private, and without any AI service.
 
@@ -11,7 +11,7 @@ Everything runs in the browser.
 
 ## Weekly workflow
 
-1. **Upload calendar PDF** — in Outlook: open Calendar → go to the week → **Home → Print** (or File → Print) → set the start/end dates → tick **Print detailed agenda** (or choose the *Detailed agenda* style) → printer **Save as PDF** (most reliable) or **Microsoft Print to PDF** → save → upload. The parser recognises several Outlook layouts (date and time on one line or on separate lines, a time column under day headings, US / day-first / ISO / month-name dates, 12- and 24-hour times, browser headers and footers). Failures are told apart: *no selectable text*, *text that can't be decoded*, *text read but meetings not recognised* (with content-free **import diagnostics** that can be copied), and *some meetings couldn't be interpreted* (the rest is imported and the problem lines are listed). For PDFs without usable text, optional **on-device text recognition** (Tesseract.js, self-hosted) reads the pages as images; every meeting read that way is flagged and must be approved individually.
+1. **Upload calendar PDF** — in Outlook: open Calendar → go to the week → **Home → Print** (or File → Print) → set the start/end dates → tick **Print detailed agenda** (or choose the *Detailed agenda* style) → printer **Save as PDF** (most reliable) or **Microsoft Print to PDF** → save → upload. The parser recognises several Outlook layouts (date and time on one line or on separate lines, a time column under day headings, US / day-first / ISO / month-name dates, 12- and 24-hour times, browser headers and footers). Failures are told apart: *no selectable text*, *text that can't be decoded*, *text read but meetings not recognised* (with content-free **import diagnostics** that can be copied), and *some meetings couldn't be interpreted* (the rest is imported and the problem lines are listed). For PDFs without usable text, optional **on-device text recognition** (Tesseract.js, self-hosted) reads the pages as images, one page at a time with no page limit (live progress, cancel, and *Retry remaining pages*; an import with unread pages is marked incomplete and blocks the CSV download until the pages are read or the user confirms they added that time); every meeting read that way is flagged and must be approved individually.
 2. **Review extracted meetings** — meetings found, dates covered, duplicates removed, overlaps flagged. Canceled meetings (“Canceled: …”) and all-day events (PTO, holidays) are excluded by default and listed separately; each can be included.
 3. **Match projects** — saved rules, project codes, `CLIENT | TASK | DESCRIPTION` titles, project names and aliases, the organizer's company and e-mail domain, then fuzzy suggestions. Anything ambiguous is a manual choice; a project with one task is preselected, several tasks need confirmation. Your own company's name on its own never selects the internal project.
 4. **Review hours** — edit date, description, project, task, start, end, hours and location; scheduled vs confirmed time; totals per day and project. Overlapping meetings are never counted twice: keep one meeting, split the overlap, exclude one, or edit the times.
@@ -72,6 +72,7 @@ npm run build      # production build (copies pdf.js + OCR assets first)
 npm start          # serve the build
 npm run e2e        # end-to-end browser tests against http://localhost:3000 (needs Playwright)
 OUTLOOK_PDF=/path/to/agenda.pdf npx vitest run tests/pdf.private.test.ts            # optional check with a real PDF (never commit it)
+OCR_PDF=/path/to/image-only.pdf npx vitest run tests/ocr-pdf.private.test.ts       # optional: read a real image-only PDF page by page (never commit it)
 PROJECTOR_REPORT=/path/to/real.xlsx npx vitest run tests/excel.private.test.ts      # optional check with a real report (never commit it)
 python3 scripts/make-excel-fixtures.py      # regenerate the synthetic Excel fixtures (needs openpyxl)
 npm run make-fixtures   # regenerate the synthetic screenshot and PDF fixtures (needs Playwright)

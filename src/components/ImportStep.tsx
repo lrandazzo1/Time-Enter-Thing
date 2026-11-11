@@ -1,12 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "./store";
 import { Badge, Button, Card, Dropzone, Notice } from "./ui";
 import type { TimeEntry } from "@/lib/types";
 import { eventToEntry } from "@/lib/matching";
 import { formatDecimalHours, intervalMinutes, isValidHHMM, parseHoursInput, prettyDate, toUSDate } from "@/lib/time";
-import { AgendaError, PARTIAL_MESSAGE, parseAgenda, type AgendaDiagnostics, type AgendaResult, type RejectedLine } from "@/lib/pdf/agenda";
-import { extractPdfText, ocrPdf, OCR_MAX_PAGES } from "@/lib/pdf/extract";
+import { AgendaError, parseAgenda, textStats, type AgendaDiagnostics, type AgendaResult, type RejectedLine } from "@/lib/pdf/agenda";
+import { extractPdfText, fileKey, ocrPdfPages, type OcrPdfProgress } from "@/lib/pdf/extract";
+import { meetingsSoFar, missingPages, pageRanges, readPages, type OcrPagesState } from "@/lib/pdf/ocrRun";
 import { ImportDiagnostics } from "./ImportDiagnostics";
 import { uid } from "@/lib/uid";
 
@@ -28,6 +29,25 @@ export interface ImportSummary {
   /** Meetings that were read but need checking (uncertain title, OCR, unusual length…). */
   flagged?: number;
   diagnostics?: AgendaDiagnostics;
+  /** Text recognition didn't read every page: the timesheet is missing those pages' meetings. */
+  incomplete?: IncompleteImport;
+}
+
+export interface IncompleteImport {
+  totalPages: number;
+  missingPages: number[];
+  reason: "cancelled" | "failed";
+  /** The user confirmed they added the missing pages' time themselves. */
+  acknowledged?: boolean;
+}
+
+/** Pages read so far for the PDF being recognised — kept in memory (not storage) so a retry can continue. */
+let ocrSession: { file: File; state: OcrPagesState } | null = null;
+export const canRetryOcr = (fileName: string) => Boolean(ocrSession && ocrSession.file.name === fileName && missingPages(ocrSession.state).length);
+
+interface Progress extends OcrPdfProgress {
+  meetings: number;
+  failed: number;
 }
 
 interface Problem {
@@ -39,6 +59,8 @@ interface Problem {
   /** Offer on-device text recognition for this file. */
   ocrFile?: File;
   afterOcr?: boolean;
+  /** Offer to retry the pages text recognition hasn't read yet. */
+  retryOcr?: boolean;
 }
 
 const TITLES: Record<Problem["kind"], string> = {
@@ -72,25 +94,42 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
   const { period, setPeriod, settings, projects, entries, setEntries, rules, lastImport, setLastImport } = useStore();
   const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
   const [replace, setReplace] = useState(true);
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []); // stop recognition if the step is left
 
-  function applyResult(r: AgendaResult, f: File, method: "text" | "ocr") {
+  function applyResult(r: AgendaResult, f: File, method: "text" | "ocr", opts: { incomplete?: IncompleteImport; retry?: boolean } = {}) {
     const newPeriod = r.period ?? period;
     if (r.period) setPeriod(r.period);
-    const base = replace ? [] : entries;
-    const known = new Set(base.filter((e) => e.included && e.fingerprint).map((e) => e.fingerprint!));
-    const fresh: TimeEntry[] = r.events.map((ev) => {
-      const e = eventToEntry(ev, projects, settings, rules);
-      if (e.fingerprint && e.included && known.has(e.fingerprint)) {
-        return { ...e, included: false, excludeReason: "Already in this timesheet", notes: [...e.notes, { code: "duplicate", level: "info", message: "Same meeting as an entry already in this timesheet — excluded." }] };
-      }
-      return e;
-    });
-    setEntries([...base, ...fresh]);
+    let next: TimeEntry[];
+    if (opts.retry) {
+      // Retrying the remaining pages: keep manual entries and the user's version of meetings already
+      // imported from this PDF; add the newly read meetings. Parsing ran over all pages in order, so a
+      // meeting spanning a page break appears once.
+      const old = new Map(entries.filter((e) => e.source === "pdf" && e.fingerprint).map((e) => [e.fingerprint!, e]));
+      const fresh = r.events.map((ev) => {
+        const e = eventToEntry(ev, projects, settings, rules);
+        return (e.fingerprint && old.get(e.fingerprint)) || e;
+      });
+      next = [...entries.filter((e) => e.source !== "pdf"), ...fresh];
+    } else {
+      const base = replace ? [] : entries;
+      const known = new Set(base.filter((e) => e.included && e.fingerprint).map((e) => e.fingerprint!));
+      const fresh: TimeEntry[] = r.events.map((ev) => {
+        const e = eventToEntry(ev, projects, settings, rules);
+        if (e.fingerprint && e.included && known.has(e.fingerprint)) {
+          return { ...e, included: false, excludeReason: "Already in this timesheet", notes: [...e.notes, { code: "duplicate", level: "info", message: "Same meeting as an entry already in this timesheet — excluded." }] };
+        }
+        return e;
+      });
+      next = [...base, ...fresh];
+    }
+    setEntries(next);
     const flagged = r.events.filter((e) => e.parseNotes?.some((n) => n.code === "pdf-check")).length;
     setLastImport({
       fileName: f.name,
-      pages: r.pages,
+      pages: opts.incomplete?.totalPages ?? r.pages,
       meetings: r.events.length,
       timed: r.events.filter((e) => !e.allDay).length,
       canceled: r.events.filter((e) => e.canceled).length,
@@ -103,12 +142,14 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
       rejected: r.rejected,
       flagged,
       diagnostics: r.diagnostics,
+      incomplete: opts.incomplete,
     });
     setReplace(true);
     onDone();
   }
 
   async function onFiles(files: File[]) {
+    if (progress) return;
     setProblem(null);
     const f = files[0];
     if (!f) return;
@@ -131,21 +172,48 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
     }
   }
 
-  async function runOcr(f: File) {
+  /** Read every page with text recognition, one page at a time; `retry` continues with the missing pages. */
+  async function runOcr(f: File, retry = false) {
+    if (progress) return;
     setProblem(null);
-    setBusy("Starting text recognition on this device…");
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setProgress({ page: 0, total: 0, index: 0, count: 0, status: "Starting text recognition on this device…", progress: 0, meetings: 0, failed: 0 });
+    const prev = retry && ocrSession && ocrSession.state.fileKey === fileKey(f) ? ocrSession.state : undefined;
+    let state: OcrPagesState | undefined;
     try {
-      const x = await ocrPdf(f, (p) => setBusy(p.status));
-      const r = parseAgenda(x.pages, { dateOrder: settings.csvDateOrder, stats: x.stats, ocr: true });
-      if (x.truncated) r.warnings.push(`Only the first ${OCR_MAX_PAGES} pages were read with text recognition.`);
-      applyResult(r, f, "ocr");
+      const run = await ocrPdfPages(f, {
+        state: prev,
+        signal: ctrl.signal,
+        onProgress: (p) => setProgress((old) => (old ? { ...old, ...p } : null)),
+        onPageDone: (st) => setProgress((old) => (old ? { ...old, meetings: meetingsSoFar(st, settings.csvDateOrder), failed: Object.keys(st.failed).length } : null)),
+      });
+      state = run.state;
+      ocrSession = { file: f, state };
+      const read = readPages(state);
+      const missing = missingPages(state);
+      const incomplete: IncompleteImport | undefined = missing.length ? { totalPages: state.total, missingPages: missing, reason: run.cancelled ? "cancelled" : "failed" } : undefined;
+      if (!read.length) {
+        setProblem({ kind: "other", title: run.cancelled ? "Text recognition cancelled" : "No page could be read", message: run.cancelled ? "Nothing was imported." : "Text recognition couldn't read any page of this PDF.", ocrFile: f, retryOcr: !run.cancelled });
+        return;
+      }
+      const r = parseAgenda(read, { dateOrder: settings.csvDateOrder, stats: textStats(read), ocr: true });
+      applyResult(r, f, "ocr", { incomplete, retry: Boolean(prev) });
     } catch (e) {
-      setProblem(toProblem(e, f, true));
+      const p = toProblem(e, f, true);
+      if (state && missingPages(state).length) {
+        p.message = `Pages ${pageRanges(missingPages(state))} of ${state.total} weren't read yet, and no meetings were found on the pages that were. ${p.message}`;
+        p.retryOcr = true;
+        p.ocrFile = f;
+      }
+      setProblem(p);
     } finally {
-      setBusy(null);
+      setProgress(null);
+      abortRef.current = null;
     }
   }
 
+  const inc = lastImport?.incomplete;
   return (
     <div className="stack">
       {projects.length === 0 && (
@@ -157,6 +225,36 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
         <h2 className="upload-title">Upload Your Outlook Calendar PDF</h2>
         <p className="muted">Export your calendar from Outlook using <strong>Print → Detailed agenda → Save as PDF</strong>.</p>
         <Dropzone accept=".pdf,application/pdf" onFiles={onFiles} label={busy ?? <><strong>Drop your calendar PDF here</strong> or click to choose</>} hint="Read in this browser only — the PDF is never uploaded. One week per PDF works best." icon="📄" />
+        {progress && (
+          <div className="ocr-progress mt" role="status" aria-live="polite">
+            <strong>{progress.total ? `Processing page ${progress.page} of ${progress.total}` : progress.status}</strong>
+            <progress max={Math.max(1, progress.count)} value={Math.min(progress.count, progress.index + progress.progress)} aria-label="Text recognition progress" />
+            <div className="small muted">
+              {progress.total > 0 && progress.count < progress.total && <>Retrying {progress.count} page{progress.count === 1 ? "" : "s"} · </>}
+              {progress.total > 0 && <>{progress.status === `Processing page ${progress.page} of ${progress.total}` ? "Rendering page…" : progress.status} · </>}
+              <span className="ocr-meetings">{progress.meetings} meeting{progress.meetings === 1 ? "" : "s"} identified so far</span>
+              {progress.failed > 0 && <> · <span className="text-warning">{progress.failed} page{progress.failed === 1 ? "" : "s"} couldn&apos;t be read (you can retry)</span></>}
+            </div>
+            <div className="row gap-sm mt">
+              <Button size="sm" onClick={() => abortRef.current?.abort()}>Cancel</Button>
+              <span className="small muted">Pages already read are kept; you can continue later.</span>
+            </div>
+          </div>
+        )}
+        {inc && !progress && (
+          <div className="mt">
+            <Notice tone="error" title={`Incomplete import: page${inc.missingPages.length === 1 ? "" : "s"} ${pageRanges(inc.missingPages)} of ${inc.totalPages} ${inc.missingPages.length === 1 ? "wasn't" : "weren't"} read`}>
+              <p>{inc.reason === "cancelled" ? "Text recognition was cancelled" : "Some pages couldn't be read"}, so meetings on {inc.missingPages.length === 1 ? "that page are" : "those pages are"} missing from this timesheet. The CSV can't be downloaded until the remaining pages are read or you confirm you added that time yourself.</p>
+              <div className="row gap-sm mt">
+                {lastImport && canRetryOcr(lastImport.fileName) ? (
+                  <Button size="sm" variant="primary" onClick={() => runOcr(ocrSession!.file, true)}>Retry remaining pages</Button>
+                ) : (
+                  <span className="small">To continue, upload the same PDF again and choose <em>Read with text recognition</em>.</span>
+                )}
+              </div>
+            </Notice>
+          </div>
+        )}
         {entries.length > 0 && (
           <label className="check mt">
             <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
@@ -171,16 +269,17 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
             </Notice>
             {problem.ocrFile && (
               <Notice tone="info" title="Optional: read the pages with on-device text recognition">
-                <p>The pages can be read as images right here in your browser (free, nothing is uploaded). It is slower — several seconds per page — and recognised text can contain mistakes, so <strong>every meeting will be flagged for you to check</strong> against your calendar before export.</p>
+                <p>The pages can be read as images right here in your browser (free, nothing is uploaded), one page at a time with no page limit. It is slower — a few seconds per page — and recognised text can contain mistakes, so <strong>every meeting will be flagged for you to check</strong> against your calendar before export.</p>
                 <div className="row gap-sm mt">
-                  <Button size="sm" disabled={Boolean(busy)} onClick={() => runOcr(problem.ocrFile!)}>Read with text recognition</Button>
+                  {problem.retryOcr && canRetryOcr(problem.ocrFile.name) && <Button size="sm" variant="primary" disabled={Boolean(busy || progress)} onClick={() => runOcr(problem.ocrFile!, true)}>Retry remaining pages</Button>}
+                  <Button size="sm" disabled={Boolean(busy || progress)} onClick={() => runOcr(problem.ocrFile!)}>{problem.retryOcr ? "Start again from page 1" : "Read with text recognition"}</Button>
                 </div>
               </Notice>
             )}
             <ImportDiagnostics diagnostics={problem.diagnostics} category={problem.category} open={problem.kind === "unrecognized"} />
           </div>
         )}
-        {lastImport && !busy && !problem && (
+        {lastImport && !busy && !progress && !problem && !inc && (
           <p className="small muted mt">Last import: {lastImport.fileName} · {lastImport.meetings} meetings · {lastImport.period ? `${toUSDate(lastImport.period.start)} – ${toUSDate(lastImport.period.end)}` : ""} · <button className="link" onClick={onDone}>review →</button></p>
         )}
         <details className="help">

@@ -6,6 +6,7 @@ import type { TimeEntry } from "@/lib/types";
 import { findOverlaps } from "@/lib/review";
 import { formatDecimalHours, prettyDate, toUSDate } from "@/lib/time";
 import { PARTIAL_MESSAGE } from "@/lib/pdf/agenda";
+import { pageRanges } from "@/lib/pdf/ocrRun";
 import { ImportDiagnostics } from "./ImportDiagnostics";
 
 /** Step 2 — what was read from the PDF: meetings, dates covered, canceled/all-day exclusions, warnings. */
@@ -33,12 +34,18 @@ export function ExtractStep({ onNext, onBack }: { onNext: () => void; onBack: ()
   return (
     <div className="stack">
       <div className="summary-grid">
-        <div className="stat stat-ok"><span className="stat-label">Meetings found</span><span className="stat-value">{lastImport?.timed ?? included.length}</span><span className="stat-sub">{formatDecimalHours(scheduled)} h scheduled · {lastImport?.pages ?? "?"} PDF pages</span></div>
+        <div className="stat stat-ok"><span className="stat-label">Meetings found</span><span className="stat-value">{lastImport?.timed ?? included.length}</span><span className="stat-sub">{formatDecimalHours(scheduled)} h scheduled · {lastImport?.incomplete && !lastImport.incomplete.acknowledged ? `${lastImport.pages - lastImport.incomplete.missingPages.length} of ${lastImport.pages} PDF pages read` : `${lastImport?.pages ?? "?"} PDF pages`}</span></div>
         <div className="stat"><span className="stat-label">Dates covered</span><span className="stat-value small-value">{lastImport?.period ? `${toUSDate(lastImport.period.start)} – ${toUSDate(lastImport.period.end)}` : "—"}</span><span className="stat-sub">from the PDF header</span></div>
         <div className="stat"><span className="stat-label">Canceled</span><span className="stat-value">{lastImport?.canceled ?? 0}</span><span className="stat-sub">excluded by default</span></div>
         <div className="stat"><span className="stat-label">All-day</span><span className="stat-value">{lastImport?.allDay ?? 0}</span><span className="stat-sub">PTO, holidays — excluded</span></div>
       </div>
 
+      {lastImport?.incomplete && !lastImport.incomplete.acknowledged && (
+        <Notice tone="error" title={`Incomplete import: page${lastImport.incomplete.missingPages.length === 1 ? "" : "s"} ${pageRanges(lastImport.incomplete.missingPages)} of ${lastImport.incomplete.totalPages} ${lastImport.incomplete.missingPages.length === 1 ? "wasn't" : "weren't"} read`}>
+          <p>{lastImport.incomplete.reason === "cancelled" ? "Text recognition was cancelled before the end of the PDF" : "Some pages couldn't be read"}. The meetings below come only from the pages that were read — this is not the whole week yet.</p>
+          <div className="row gap-sm mt"><Button size="sm" variant="primary" onClick={onBack}>← Retry the remaining pages</Button></div>
+        </Notice>
+      )}
       {lastImport?.method === "ocr" && (
         <Notice tone="warning" title="Read with on-device text recognition">
           This PDF had no usable text, so its pages were read as images. Every meeting below is flagged: compare its title, date and times with your calendar before approving it.

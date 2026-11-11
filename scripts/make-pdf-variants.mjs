@@ -10,6 +10,7 @@
 //   variant-image-agenda.pdf   an agenda page embedded only as an image (no text layer) — for text recognition
 //   variant-undecodable.pdf    text drawn with a font that has no Unicode mapping (hand-written PDF)
 //   agenda-image.png           the same image as variant-image-agenda.pdf, for the Node OCR test
+//   variant-image-long.pdf     a 24-page image-only agenda (one meeting per page) — longer than the old 20-page OCR cap
 // Run: node scripts/make-pdf-variants.mjs   (needs Playwright)
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
@@ -142,6 +143,29 @@ const png = await shot.screenshot({ fullPage: true });
 writeFileSync(OUT + "agenda-image.png", png);
 await page.setContent(`<html><body style="margin:0"><img src="data:image/png;base64,${png.toString("base64")}" style="width:100%"></body></html>`);
 await page.pdf({ path: OUT + "variant-image-agenda.pdf", format: "Letter", printBackground: true });
+
+// 24 image-only pages, one meeting each (Mon–Fri, five per day), each page a separate picture.
+const clients = ["Acme Components", "Globex Corporation", "Initech", "Umbrella Health", "Northwind Traders", "Stark Logistics"];
+const longShot = await browser.newPage({ viewport: { width: 816, height: 1056 }, deviceScaleFactor: 2 });
+const imgs = [];
+for (let i = 1; i <= 24; i++) {
+  const d = 2 + Math.floor((i - 1) / 5);
+  const wd = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"][d - 2];
+  const h = 8 + ((i - 1) % 5);
+  const t12 = (x) => `${x > 12 ? x - 12 : x}:00 ${x >= 12 ? "PM" : "AM"}`;
+  await longShot.setContent(`<!doctype html><html><body style="font-family:Arial,sans-serif;margin:48px;color:#000;background:#fff">
+    ${i === 1 ? '<div style="font-size:15px">11/2/2026 to 11/6/2026</div>' : ""}
+    ${(i - 1) % 5 === 0 ? `<div style="font-size:22px;font-weight:bold;margin:20px 0 14px">${wd}, November ${d}, 2026</div>` : ""}
+    <div style="font-size:19px;font-weight:bold">${clients[i % clients.length]} | Planning | Session ${i}</div>
+    <div style="font-size:15px;margin-top:2px">${wd.slice(0, 3)} 11/${d}/2026 ${t12(h)} - ${t12(h + 1)}</div>
+    <div style="font-size:15px;margin-top:10px">Location: Microsoft Teams Meeting</div>
+    <div style="font-size:15px">Organizer: Sam Organizer</div>
+    <div style="font-size:15px">Required Attendees: Person One; Person Two; Person Three;</div>
+  </body></html>`);
+  imgs.push((await longShot.screenshot({ type: "png" })).toString("base64"));
+}
+await page.setContent(`<html><body style="margin:0">${imgs.map((b, k) => `<img src="data:image/png;base64,${b}" style="width:100%;display:block;${k ? "break-before:page" : ""}">`).join("")}</body></html>`);
+await page.pdf({ path: OUT + "variant-image-long.pdf", format: "Letter", printBackground: true, margin: { top: 0, bottom: 0, left: 0, right: 0 } });
 await browser.close();
 
 /* ---------- 7. hand-written PDF whose font has no Unicode mapping ---------- */

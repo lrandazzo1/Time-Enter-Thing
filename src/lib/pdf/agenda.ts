@@ -118,6 +118,9 @@ export function normalizeText(s: string): string {
     .replace(JUNK, " ")
     .replace(/[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]/g, "-")
     .replace(/\b([ap])\.\s?m\.?(?=\s|$|[),;])/gi, (_, c: string) => `${c.toUpperCase()}M`)
+    // Text recognition sometimes glues punctuation between the year and the time ("2026°10:00", "AM.-").
+    .replace(/(\d{4})[/°.,·]+(?=\d{1,2}[:.]\d{2})/g, "$1 ")
+    .replace(/\b([AP]M)\.(?=\s*-)/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -465,7 +468,7 @@ function pageFurniture(lines: PdfLine[]): Set<PdfLine> {
     if (last && /^(https?:\/\/|about:blank)\S*(\s+\d{1,3}\s*\/\s*\d{1,3})?$/i.test(last.text)) drop.add(last);
   }
   if (pages.length < 2) return drop;
-  const edge = pages.flatMap((pl) => [...pl.slice(0, 2), ...pl.slice(-2)].map((l) => ({ l, key: l.text.replace(/\d+/g, "#") })));
+  const edge = pages.flatMap((pl) => [...pl.slice(0, 2), ...pl.slice(-2)].map((l) => ({ l, key: l.text.replace(/\d+\s*(\/|of)\s*\d+/gi, "#/#") })));
   const counts = new Map<string, Set<number>>();
   for (const { l, key } of edge) counts.set(key, (counts.get(key) ?? new Set()).add(l.page));
   for (const { l, key } of edge) if (counts.get(key)!.size >= Math.max(2, Math.ceil(pages.length * 0.5))) drop.add(l);
@@ -593,6 +596,8 @@ export function parseAgenda(pages: PdfPageText[], opts: { dateOrder?: DateOrder;
   const sameRow = (a: PdfLine, b: PdfLine) => a.page === b.page && Math.abs(a.y - b.y) < 0.5;
   const adjacent = (upper: PdfLine, lower: PdfLine, gapFactor: number) =>
     upper.page === lower.page ? upper.y - lower.y <= Math.max(upper.size, lower.size) * gapFactor : lines.findIndex((l) => l.page === lower.page) === lines.indexOf(lower) && lower.page === upper.page + 1;
+  // Pages are consecutive in the PDF (not separated by a page that wasn't read).
+  const pagesConsecutive = (upper: PdfLine, lower: PdfLine) => lower.page === upper.page + 1 && lines.findIndex((l) => l.page === lower.page) === lines.indexOf(lower);
   const titleish = (j: number) => j >= 0 && cls[j].kind === "text" && !isHeading(j) && !anchorLines.has(j) && !LABEL.test(lines[j].text) && !BOILERPLATE.test(lines[j].text);
   for (const a of anchors) {
     const block = lines[a.top];
@@ -602,7 +607,7 @@ export function parseAgenda(pages: PdfPageText[], opts: { dateOrder?: DateOrder;
     if (a.title) rule = a.titleRule;
     else if (titleish(j) && !sameRow(above, block)) {
       if (opts.ocr) rule = adjacent(above, block, 3) ? "ocr: line above" : "";
-      else if (above.size > block.size + 0.4) rule = "larger font";
+      else if (above.size > block.size + 0.4 && (above.page === block.page || pagesConsecutive(above, block))) rule = "larger font";
       else if (above.font !== block.font && above.size >= block.size - 0.3 && adjacent(above, block, 2.2)) rule = "bold/other font";
       else if (adjacent(above, block, 2.2) && above.text.length <= 200) rule = "line above (uncertain)";
     }
@@ -615,8 +620,11 @@ export function parseAgenda(pages: PdfPageText[], opts: { dateOrder?: DateOrder;
       while (start - 1 >= 0 && a.top - start < 5) {
         const prev = lines[start - 1];
         const cur = lines[start];
-        if (!titleish(start - 1) || Math.abs(prev.size - above.size) > 0.3 || (prev.font !== above.font && !opts.ocr) || !adjacent(prev, cur, 1.8)) break;
-        if (opts.ocr && Math.abs(prev.size - above.size) > above.size * 0.2) break;
+        // Text recognition measures sizes from line boxes, which grow with ascenders/descenders, so allow
+        // ±40% there (the tight line spacing below still separates a title from the text above it);
+        // PDFs need the same size and font.
+        const sameSize = opts.ocr ? Math.abs(prev.size - above.size) <= Math.max(prev.size, above.size) * 0.4 : Math.abs(prev.size - above.size) <= 0.3 && prev.font === above.font;
+        if (!titleish(start - 1) || !sameSize || !adjacent(prev, cur, 1.8)) break;
         start--;
       }
       a.titleStart = start;

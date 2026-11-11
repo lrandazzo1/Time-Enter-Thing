@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.2.4 — Text recognition reads every page
+
+### Fixed
+- Text recognition stopped after 20 pages (`OCR_MAX_PAGES` in `src/lib/pdf/extract.ts`) and warned “Only the first 20 pages were read…”. The cap is gone. Pages are now rendered and read **one at a time** with a single reused recognition engine, and each page's canvas is released before the next, so memory stays at one page however long the PDF is (previously every page was rendered to an image before any was read).
+- Mostly blank pages (e.g. a last page with one short meeting) were turned completely black by the contrast stretch, so their meetings were lost. Fixed in `src/lib/ocr/enhance.ts`.
+- The coloured category square left of each title is no longer read into the title (“Hl”, “HB”, “#”), and titles that wrap onto two lines are kept whole (so “Canceled: …” on the first line is recognised).
+
+### Added
+- Live progress: *Processing page 21 of 28*, a progress bar, and the number of meetings identified so far.
+- **Cancel** at any time; pages already read are kept.
+- A page that fails or takes too long is recorded and the run continues; **Retry remaining pages** reads only the missing pages and merges them (meetings are always parsed from all pages in order, so a meeting split across a page break appears once; entries you already edited are kept).
+- **Incomplete imports can't pass as a full week**: Upload, Review extracted meetings and Review hours show which pages weren't read, and the CSV download is blocked until the remaining pages are read or you confirm you added that time yourself.
+- A title is never joined to a time across a page that wasn't read.
+- Tests: the sequential runner (no cap, one page at a time, failures, timeouts, cancel, retry without duplicates, page gaps), blank-page enhancement, a 24-page image-only fixture in the browser (progress, cancel, export blocked, retry), and a local-only test for a real image-only PDF.
+
 ## 2.2.3 — Calendar PDF compatibility fix
 
 ### Fixed

@@ -9,6 +9,7 @@ import { formatDecimalHours, intervalMinutes, isValidHHMM, listDates, parseHours
 import { upsertRules } from "./MatchStep";
 import { uid } from "@/lib/uid";
 import { resolveProjectName } from "@/lib/projectName";
+import { pageRanges } from "@/lib/pdf/ocrRun";
 
 const MANUAL_MATCH_CODES = ["no-project", "ambiguous-project", "task-unclear", "convention-task-unmatched", "fuzzy-suggestion", "domain-match"];
 
@@ -41,7 +42,8 @@ const STALE: Record<string, (e: TimeEntry) => boolean> = {
 export const liveNotes = (e: TimeEntry): ImportNote[] => e.notes.filter((n) => !STALE[n.code]?.(e));
 
 export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
-  const { entries, setEntries, projects, settings, setSettings, period, rules, setRules } = useStore();
+  const { entries, setEntries, projects, settings, setSettings, period, rules, setRules, lastImport } = useStore();
+  const inc = lastImport?.incomplete && !lastImport.incomplete.acknowledged ? lastImport.incomplete : null;
   /** "Full Projector name (CODE)" when the name is known; otherwise the client + code label. */
   const projectLabel = (projectId: string | null, fallback: string) => {
     const p = projectId ? projects.find((x) => x.id === projectId) : undefined;
@@ -111,6 +113,11 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
 
   return (
     <div className="stack">
+      {inc && (
+        <Notice tone="error" title={`Incomplete calendar import — page${inc.missingPages.length === 1 ? "" : "s"} ${pageRanges(inc.missingPages)} of ${inc.totalPages} not read`}>
+          Meetings on {inc.missingPages.length === 1 ? "that page" : "those pages"} are missing from this week. Go back to <strong>Upload calendar PDF</strong> and choose <em>Retry remaining pages</em>, or add that time manually.
+        </Notice>
+      )}
       <Notice tone="info" title="Calendar time is a proposal, not proof of time worked">
         Check every entry against what you actually worked. Change hours, tasks and descriptions as needed, exclude anything that wasn&apos;t work, and add time that isn&apos;t on your calendar.
       </Notice>

@@ -35,3 +35,19 @@ export async function preprocessImage(file: Blob): Promise<Prepared> {
   ctx.putImageData(new ImageData(res.data as Uint8ClampedArray<ArrayBuffer>, res.width, res.height), 0, 0);
   return { canvas, scale, width, height, inverted: res.inverted };
 }
+
+/** Same preparation for an already-drawn canvas (e.g. a rendered PDF page). The input is not modified. */
+export function preprocessCanvas(src: HTMLCanvasElement): Prepared {
+  const { width, height } = src;
+  if (!width || !height) throw new Error("The page image is empty.");
+  const sctx = src.getContext("2d", { willReadFrequently: true });
+  if (!sctx) throw new Error("This browser can't process images (canvas unavailable).");
+  const scale = chooseScale(width, height);
+  const res = enhance(sctx.getImageData(0, 0, width, height), scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = res.width;
+  canvas.height = res.height;
+  canvas.getContext("2d")!.putImageData(new ImageData(res.data as Uint8ClampedArray<ArrayBuffer>, res.width, res.height), 0, 0);
+  return { canvas, scale, width, height, inverted: res.inverted };
+}
+

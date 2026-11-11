@@ -61,8 +61,14 @@ export function enhance(src: Rgba, scale: number): Rgba & { inverted: boolean } 
     }
     return 255;
   };
-  const lo = pct(0.01);
-  const hi = Math.max(lo + 1, pct(0.99));
+  let lo = pct(0.01);
+  let hi = Math.max(lo + 1, pct(0.99));
+  // A mostly blank page (e.g. one short meeting at the top) has >99% background pixels, so both
+  // percentiles land on the background colour and stretching would turn the whole image one colour.
+  if (hi - lo < 64) {
+    lo = 0;
+    hi = 255;
+  }
   for (let p = 0, i = 0; p < n; p++, i += 4) {
     let v = ((gray[p] - lo) * 255) / (hi - lo);
     v = v < 0 ? 0 : v > 255 ? 255 : v;

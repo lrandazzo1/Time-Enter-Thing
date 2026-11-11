@@ -1,4 +1,4 @@
-# Test results — Timesheet Converter 2.2.3
+# Test results — Timesheet Converter 2.2.4
 
 Run on the final code in this ZIP (Node 22, Chromium via Playwright, production build).
 
@@ -6,8 +6,8 @@ Run on the final code in this ZIP (Node 22, Chromium via Playwright, production 
 
 | Suite | Result |
 |---|---|
-| Unit, PDF parser, Excel and OCR integration tests (Vitest) | **152 passed, 0 failed** (13 files; the two real-file tests are skipped unless local files are supplied) |
-| End-to-end browser workflow (synthetic PDF + Excel, returning user, privacy, accessibility, mobile) | **35/35 passed** |
+| Unit, PDF parser, Excel and OCR integration tests (Vitest) | **159 passed, 0 failed** (16 files; the three real-file tests are skipped unless local files are supplied) |
+| End-to-end browser workflow (synthetic PDF + Excel, returning user, privacy, accessibility, mobile) | **39/39 passed** |
 | Type check (`tsc --noEmit`) | **Passed** |
 | Production build (`npm run build`) | **Passed** — static pages only; no API routes, no environment variables |
 | Clean install of the ZIP contents with no AI variables (`npm ci`, `npm run build`, `npm test`) | **Passed** |
@@ -20,13 +20,16 @@ The attached Detailed agenda PDF was used only on the development machine, throu
 - **21 timed meetings**, **4 canceled** and **3 all-day** events (multi-day PTO collapsed to one event each); 0 warnings.
 - Durations checked against the PDF, including a 110-minute meeting → `1.83` and 60-minute meetings → `1.00`.
 - Titles split across page breaks and long attendee lists/descriptions were read correctly; Teams links, meeting IDs, passcodes and phone numbers do not appear in extracted descriptions.
-- After the parser rewrite for other Outlook layouts, this PDF produces exactly the same events, times, titles, organizers and period as before (compared field by field).
-- With the real Projector report, all of the matching examples from the specification behaved as required (client names are deliberately left out of this file).
+- After the parser changes, this PDF still produces exactly the same events, times, titles, organizers and period (compared field by field).
 - In the browser the same PDF showed *Meetings found 21 · Canceled 4 · All-day 3*.
 
-## The coworker's PDF
+## The coworker's 28-page PDF (no selectable text; used locally only, never stored)
 
-Not available, so **not verified**. The screenshot shows new Outlook's print dialog with *Print detailed agenda* ticked — the same layout as the working PDF. The message they saw could come from: no text in the PDF, text whose characters can't be decoded (both depend on the PDF printer — the working PDF was made with Edge's built-in *Save as PDF*), or a layout difference. Each now has its own message, diagnostics and (for the first two) a text-recognition fallback; layout differences are covered by the variant tests below.
+Created by *Microsoft: Print To PDF* (no text layer — this is why it was rejected before text recognition existed).
+
+- **Browser** (production build, Chromium): all **28 of 28 pages** read in 81 s; the progress showed *“Processing page 21 of 28 … 25 meetings identified so far”*; result **36 meetings**, with meetings from pages 21, 22, 23, 24, 26, 27 and 28; not marked incomplete.
+- **Node** (`tests/ocr-pdf.private.test.ts`, same pipeline): 28/28 pages, 0 failed pages, 36 timed meetings (25 from pages 1–20, 11 from pages 21–28), 1 all-day, 1 canceled, 0 untitled, 0 duplicates, 0 uninterpretable lines, 4 overlaps detected, mean confidence 90%; every meeting flagged for checking.
+- Spot-checked against the page images: dates/times on pages 20–28 match; the meeting alone on the last page (previously lost to the blank-page contrast bug) is now found; the wrapped canceled title on page 26 is recognised as canceled.
 
 ## End-to-end (`e2e/workflows.mjs`)
 
@@ -45,9 +48,9 @@ Synthetic, fictional data only (`tests/fixtures/pdf/agenda-week.pdf`, 6 pages).
 - ✓ export preview: Project Name left of Project Code, names from the Excel report — Acme Components - Adaptive Planning - Implementation / P001234-001 · name 332px > code 136px
 - ✓ CSV: exact six columns, codes, tasks, locations, decimal hours — BigTime_Timesheet_2026-11-01_to_2026-11-07.csv
 - ✓ CSV filename uses the PDF's date range — BigTime_Timesheet_2026-11-01_to_2026-11-07.csv
-- ✓ setup success state — first-time run 4.006s (automated)
+- ✓ setup success state — first-time run 5.665s (automated)
 - ✓ remembered match reused (TFAG not asked again) — 3 group(s) left
-- ✓ returning user: same CSV (ANSI encoding) — 2.086s (automated)
+- ✓ returning user: same CSV (ANSI encoding) — 2.209s (automated)
 - ✓ no requests to other hosts and no uploads — 26 same-origin GET requests
 - ✓ pdf.js worker served from this site
 - ✓ CSP restricts connections to this site
@@ -64,7 +67,11 @@ Synthetic, fictional data only (`tests/fixtures/pdf/agenda-week.pdf`, 6 pages).
 - ✓ partly interpretable PDF: valid meetings imported, the rest listed and flagged
 - ✓ readable but unrecognised: specific message + diagnostics without meeting content — Import diagnostics (no meeting content) | Pages	1 | Selectable text found	yes (1 of 1 pages)
 - ✓ undecodable text identified separately
-- ✓ image-only PDF read with on-device text recognition; every meeting flagged — 1.906s, 3 flagged
+- ✓ image-only PDF read with on-device text recognition; every meeting flagged — 2.534s, 3 flagged
+- ✓ long image-only PDF: live 'Processing page N of 24', progress bar, meeting count; cancel keeps pages read and marks the import incomplete — Processing page 5 of 24 · 4 meetings kept
+- ✓ incomplete import is flagged in Review and blocks the CSV download
+- ✓ retry reads only the remaining pages; all 24 pages and 24 meetings, no duplicates, no longer incomplete — MEETINGS FOUND 24 24.00 h scheduled · 24 PDF pages DATES COV
+- ✓ real image-only PDF: every page read, meetings from pages 21+ included, not incomplete — 81s · at page 21: "Processing page 21 of 28 Rendering page… · 25 meetings identified so far Cancel " · MEETINGS FOUND 36 28.67 h scheduled · 28 PDF pages DATES COVERED 11/02 · meeting pages ≥21: 21,22,23,24,26,27,28
 - ✓ real Outlook PDF in the browser — MEETINGS FOUND 21 14.67 h scheduled · 15 PDF pages DATES COVERED 11/01/2026 – 11/07/2026 from the PDF header CANCELED 4 excluded by default ALL-DAY 3 PTO, holidays — excluded
 - ✓ no page errors
 
@@ -83,29 +90,9 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 
 ## Unit and integration tests
 
-**tests/excel.test.ts** (21)
+**tests/ocr-pdf.private.test.ts** (1)
 
-- ✓ project cell > Globex - Adaptive Planning - MSP (P005678-001)
-- ✓ project cell > The Metro Public Library (MPL) - Adaptive Planning - Implementation (P007979-001)
-- ✓ project cell > Smith-Jones Holdings - Adaptive Planning - Implementation (P002468-002)
-- ✓ project cell > Odd Co - Retainer ( P000001-010 )
-- ✓ project cell > No Code Project - Support
-- ✓ project cell > Acme (Holdings) - Planning
-- ✓ Projector report (synthetic replica of the real layout) > selects the Report sheet and maps the columns
-- ✓ Projector report (synthetic replica of the real layout) > extracts codes, names, clients and de-duplicates rows with all distinct tasks
-- ✓ Projector report (synthetic replica of the real layout) > asks for confirmation when the client can't be separated from the project name
-- ✓ Projector report (synthetic replica of the real layout) > collects locations (most frequent first) and per-project locations
-- ✓ Projector report (synthetic replica of the real layout) > keeps Role only as metadata (never as a task)
-- ✓ Projector report (synthetic replica of the real layout) > reads the Options sheet for the date range and filters
-- ✓ other report layouts > handles title rows, grouped project cells, total rows and reordered columns
-- ✓ other report layouts > reads .xlsm workbooks as data only
-- ✓ other report layouts > rejects workbooks that aren't Projector reports
-- ✓ other report layouts > accepts the recommended five-column report (optional Resource Display Name) with the same result
-- ✓ other report layouts > Resource Display Name with two similar names asks which person to import
-- ✓ other report layouts > offers an employee filter only when the report has an employee column
-- ✓ import → save → match → export > saves location and roles as metadata and later reports add without wiping
-- ✓ import → save → match → export > old backups without the new fields still restore
-- ✓ import → save → match → export > matches calendar events, uses the project's location and exports the exact six columns
+- skipped: image-only Outlook agenda PDF read with text recognition (local only) > reads every page, including the ones after page 20
 
 **tests/pdf-variants.test.ts** (22)
 
@@ -132,6 +119,18 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ text recognition output > OCR lines become items; every meeting read this way is flagged for checking
 - ✓ text recognition output > masked line shapes keep only the structure
 
+**tests/pdf.private.test.ts** (1)
+
+- skipped: real Outlook Detailed agenda PDF (local only) > parses every meeting cleanly
+
+**tests/ocr-run.test.ts** (5)
+
+- ✓ sequential page runner > processes every page of a long PDF one at a time — no page cap
+- ✓ sequential page runner > a page that fails or times out is recorded and the run continues
+- ✓ sequential page runner > cancel keeps the pages read so far; retrying the rest gives the same result as one full run, without duplicates
+- ✓ sequential page runner > a missing page in the middle never joins a title to a time two pages away
+- ✓ sequential page runner > page ranges
+
 **tests/time.test.ts** (16)
 
 - ✓ decimal hours > 15 minutes -> 0.25
@@ -151,6 +150,42 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ decimal hours > parses user input
 - ✓ time zones > round-trips across DST
 
+**tests/excel.test.ts** (21)
+
+- ✓ project cell > Globex - Adaptive Planning - MSP (P005678-001)
+- ✓ project cell > The Metro Public Library (MPL) - Adaptive Planning - Implementation (P007979-001)
+- ✓ project cell > Smith-Jones Holdings - Adaptive Planning - Implementation (P002468-002)
+- ✓ project cell > Odd Co - Retainer ( P000001-010 )
+- ✓ project cell > No Code Project - Support
+- ✓ project cell > Acme (Holdings) - Planning
+- ✓ Projector report (synthetic replica of the real layout) > selects the Report sheet and maps the columns
+- ✓ Projector report (synthetic replica of the real layout) > extracts codes, names, clients and de-duplicates rows with all distinct tasks
+- ✓ Projector report (synthetic replica of the real layout) > asks for confirmation when the client can't be separated from the project name
+- ✓ Projector report (synthetic replica of the real layout) > collects locations (most frequent first) and per-project locations
+- ✓ Projector report (synthetic replica of the real layout) > keeps Role only as metadata (never as a task)
+- ✓ Projector report (synthetic replica of the real layout) > reads the Options sheet for the date range and filters
+- ✓ other report layouts > handles title rows, grouped project cells, total rows and reordered columns
+- ✓ other report layouts > reads .xlsm workbooks as data only
+- ✓ other report layouts > rejects workbooks that aren't Projector reports
+- ✓ other report layouts > accepts the recommended five-column report (optional Resource Display Name) with the same result
+- ✓ other report layouts > Resource Display Name with two similar names asks which person to import
+- ✓ other report layouts > offers an employee filter only when the report has an employee column
+- ✓ import → save → match → export > saves location and roles as metadata and later reports add without wiping
+- ✓ import → save → match → export > old backups without the new fields still restore
+- ✓ import → save → match → export > matches calendar events, uses the project's location and exports the exact six columns
+
+**tests/ocr.integration.test.ts** (5)
+
+- ✓ OCR → Projector parser (real images) > reads a full project list
+- ✓ OCR → Projector parser (real images) > reads a dark-mode screenshot (after inversion the same data is found)
+- ✓ OCR → Projector parser (real images) > combines a multi-screenshot batch: continuation, overlap and merging
+- ✓ OCR limits (real images) > a small, blurry, compressed screenshot never yields a wrong 'valid' code
+- ✓ image-only calendar PDF → on-device text recognition → agenda parser > reads the meetings, and flags every one for checking
+
+**tests/excel.private.test.ts** (1)
+
+- skipped: real Projector report (local only) > parses the report
+
 **tests/workflow.test.ts** (12)
 
 - ✓ matching priority > 1. exact project code wins
@@ -165,6 +200,31 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ project configuration > sanitises hostile backup content
 - ✓ project configuration > remembers confirmed matches by title
 - ✓ regression: Nov 2–6 week (synthetic replica) > produces the same rows, hours and totals as the imported file
+
+**tests/review.test.ts** (7)
+
+- ✓ overlaps > finds clusters and measures clock time
+- ✓ overlaps > splits overlap evenly
+- ✓ overlaps > blocks export until resolved or confirmed
+- ✓ validation > requires project, task, location, positive hours
+- ✓ validation > rejects tasks not configured for the project
+- ✓ validation > detects duplicates by fingerprint
+- ✓ merge > combines same date/project/task
+
+**tests/enhance.test.ts** (2)
+
+- ✓ OCR image enhancement > keeps text visible on a mostly blank page (>99% background)
+- ✓ OCR image enhancement > still stretches contrast on a normal page
+
+**tests/preview.test.ts** (7)
+
+- ✓ export preview: project name + code (from the imported Projector Excel report) > shows Project Name immediately left of Project Code, names taken from the report's Project column
+- ✓ export preview: project name + code (from the imported Projector Excel report) > preview rows are the CSV rows with only the name column inserted
+- ✓ export preview: project name + code (from the imported Projector Excel report) > the downloaded CSV is unchanged: six columns, project code only
+- ✓ export preview: project name + code (from the imported Projector Excel report) > missing names show “Unknown project”, are flagged, and are never replaced by the code or client
+- ✓ export preview: project name + code (from the imported Projector Excel report) > an unnamed duplicate mapping resolves the name from another saved mapping with the same code
+- ✓ export preview: project name + code (from the imported Projector Excel report) > name survives a browser refresh and a restored configuration > localStorage save → load (refresh)
+- ✓ export preview: project name + code (from the imported Projector Excel report) > name survives a browser refresh and a restored configuration > backup download → restore, and projects CSV export → import
 
 **tests/pdf.test.ts** (30)
 
@@ -221,34 +281,6 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ multiple screenshots > uses indentation: a task less indented than its project is marked uncertain
 - ✓ multiple screenshots > flags an ambiguous duplicate of a valid code
 
-**tests/ocr.integration.test.ts** (5)
-
-- ✓ OCR → Projector parser (real images) > reads a full project list
-- ✓ OCR → Projector parser (real images) > reads a dark-mode screenshot (after inversion the same data is found)
-- ✓ OCR → Projector parser (real images) > combines a multi-screenshot batch: continuation, overlap and merging
-- ✓ OCR limits (real images) > a small, blurry, compressed screenshot never yields a wrong 'valid' code
-- ✓ image-only calendar PDF → on-device text recognition → agenda parser > reads the meetings, and flags every one for checking
-
-**tests/preview.test.ts** (7)
-
-- ✓ export preview: project name + code (from the imported Projector Excel report) > shows Project Name immediately left of Project Code, names taken from the report's Project column
-- ✓ export preview: project name + code (from the imported Projector Excel report) > preview rows are the CSV rows with only the name column inserted
-- ✓ export preview: project name + code (from the imported Projector Excel report) > the downloaded CSV is unchanged: six columns, project code only
-- ✓ export preview: project name + code (from the imported Projector Excel report) > missing names show “Unknown project”, are flagged, and are never replaced by the code or client
-- ✓ export preview: project name + code (from the imported Projector Excel report) > an unnamed duplicate mapping resolves the name from another saved mapping with the same code
-- ✓ export preview: project name + code (from the imported Projector Excel report) > name survives a browser refresh and a restored configuration > localStorage save → load (refresh)
-- ✓ export preview: project name + code (from the imported Projector Excel report) > name survives a browser refresh and a restored configuration > backup download → restore, and projects CSV export → import
-
-**tests/review.test.ts** (7)
-
-- ✓ overlaps > finds clusters and measures clock time
-- ✓ overlaps > splits overlap evenly
-- ✓ overlaps > blocks export until resolved or confirmed
-- ✓ validation > requires project, task, location, positive hours
-- ✓ validation > rejects tasks not configured for the project
-- ✓ validation > detects duplicates by fingerprint
-- ✓ merge > combines same date/project/task
-
 **tests/matching.test.ts** (8)
 
 - ✓ matching > uses the CLIENT | TASK | DESCRIPTION convention
@@ -267,12 +299,4 @@ Globex - Preparing for Meeting,Main Office,P005678-001,Planning Consultant,11/05
 - ✓ BigTime CSV > neutralises spreadsheet formulas
 - ✓ BigTime CSV > names the file by period
 - ✓ BigTime CSV > encodes ANSI (Windows-1252)
-
-**tests/excel.private.test.ts** (1)
-
-- skipped: real Projector report (local only) > parses the report
-
-**tests/pdf.private.test.ts** (1)
-
-- skipped: real Outlook Detailed agenda PDF (local only) > parses every meeting cleanly
 
