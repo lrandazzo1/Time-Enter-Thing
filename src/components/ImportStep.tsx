@@ -5,8 +5,9 @@ import { Badge, Button, Card, Dropzone, Notice } from "./ui";
 import type { TimeEntry } from "@/lib/types";
 import { eventToEntry } from "@/lib/matching";
 import { formatDecimalHours, intervalMinutes, isValidHHMM, parseHoursInput, prettyDate, toUSDate } from "@/lib/time";
-import { AgendaError, parseAgenda } from "@/lib/pdf/agenda";
-import { extractPdfText } from "@/lib/pdf/extract";
+import { AgendaError, PARTIAL_MESSAGE, parseAgenda, type AgendaDiagnostics, type AgendaResult, type RejectedLine } from "@/lib/pdf/agenda";
+import { extractPdfText, ocrPdf, OCR_MAX_PAGES } from "@/lib/pdf/extract";
+import { ImportDiagnostics } from "./ImportDiagnostics";
 import { uid } from "@/lib/uid";
 
 export interface ImportSummary {
@@ -20,59 +21,126 @@ export interface ImportSummary {
   warnings: string[];
   period: { start: string; end: string } | null;
   importedAt: string;
+  /** "ocr" when the PDF had no usable text and was read with on-device text recognition. */
+  method?: "text" | "ocr";
+  /** Lines that looked like meeting times but couldn't be interpreted (redacted). */
+  rejected?: RejectedLine[];
+  /** Meetings that were read but need checking (uncertain title, OCR, unusual length…). */
+  flagged?: number;
+  diagnostics?: AgendaDiagnostics;
+}
+
+interface Problem {
+  kind: "no-text" | "undecodable" | "unrecognized" | "unreadable" | "other";
+  title: string;
+  message: string;
+  category?: string;
+  diagnostics?: AgendaDiagnostics;
+  /** Offer on-device text recognition for this file. */
+  ocrFile?: File;
+  afterOcr?: boolean;
+}
+
+const TITLES: Record<Problem["kind"], string> = {
+  "no-text": "No selectable text in this PDF",
+  undecodable: "This PDF's text can't be decoded",
+  unrecognized: "Meetings not recognised",
+  unreadable: "Couldn't read this PDF",
+  other: "Couldn't read this PDF",
+};
+
+function toProblem(e: unknown, file: File, afterOcr = false): Problem {
+  if (e instanceof AgendaError) {
+    const kind = e.code;
+    return {
+      kind,
+      title: afterOcr ? "Text recognition couldn't find the meetings either" : TITLES[kind],
+      message: afterOcr ? "The pages were read on this device, but no meeting dates and times could be identified. Add your time manually, or export the calendar again from Outlook with Print detailed agenda → Save as PDF." : e.message,
+      category: e.category,
+      diagnostics: e.diagnostics,
+      ocrFile: !afterOcr && kind !== "unreadable" ? file : undefined,
+      afterOcr,
+    };
+  }
+  const err = e as Error;
+  if (err?.name === "AbortError") return { kind: "other", title: "Cancelled", message: "Text recognition was cancelled." };
+  return { kind: "other", title: TITLES.other, message: "Something went wrong while reading this PDF on this device.", category: `PARSER_${(err?.name || "ERROR").toUpperCase()}` };
 }
 
 /** Step 1 — the only calendar input: Outlook's "Detailed agenda" printed to PDF, read in this browser. */
 export function ImportStep({ onDone }: { onDone: () => void }) {
   const { period, setPeriod, settings, projects, entries, setEntries, rules, lastImport, setLastImport } = useStore();
-  const [error, setError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [replace, setReplace] = useState(true);
 
+  function applyResult(r: AgendaResult, f: File, method: "text" | "ocr") {
+    const newPeriod = r.period ?? period;
+    if (r.period) setPeriod(r.period);
+    const base = replace ? [] : entries;
+    const known = new Set(base.filter((e) => e.included && e.fingerprint).map((e) => e.fingerprint!));
+    const fresh: TimeEntry[] = r.events.map((ev) => {
+      const e = eventToEntry(ev, projects, settings, rules);
+      if (e.fingerprint && e.included && known.has(e.fingerprint)) {
+        return { ...e, included: false, excludeReason: "Already in this timesheet", notes: [...e.notes, { code: "duplicate", level: "info", message: "Same meeting as an entry already in this timesheet — excluded." }] };
+      }
+      return e;
+    });
+    setEntries([...base, ...fresh]);
+    const flagged = r.events.filter((e) => e.parseNotes?.some((n) => n.code === "pdf-check")).length;
+    setLastImport({
+      fileName: f.name,
+      pages: r.pages,
+      meetings: r.events.length,
+      timed: r.events.filter((e) => !e.allDay).length,
+      canceled: r.events.filter((e) => e.canceled).length,
+      allDay: r.events.filter((e) => e.allDay).length,
+      duplicatesRemoved: r.duplicatesRemoved,
+      warnings: [...r.warnings.filter((w) => !/couldn't be interpreted/.test(w)), ...(newPeriod && r.events.some((e) => e.date < newPeriod.start || e.date > newPeriod.end) ? ["Some meetings fall outside the printed date range."] : [])],
+      period: r.period,
+      importedAt: new Date().toISOString(),
+      method,
+      rejected: r.rejected,
+      flagged,
+      diagnostics: r.diagnostics,
+    });
+    setReplace(true);
+    onDone();
+  }
+
   async function onFiles(files: File[]) {
-    setError(null);
+    setProblem(null);
     const f = files[0];
     if (!f) return;
     if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") {
-      setError("Please upload the PDF from Outlook (Print → Detailed agenda → Save as PDF). Other calendar files and images aren't supported.");
+      setProblem({ kind: "other", title: "Not a PDF", message: "Please upload the PDF from Outlook (Print → Print detailed agenda → Save as PDF). Other calendar files and images aren't supported." });
       return;
     }
     if (f.size > 40 * 1024 * 1024) {
-      setError("That PDF is larger than 40 MB. Print a shorter date range (one week is ideal).");
+      setProblem({ kind: "unreadable", title: TITLES.unreadable, message: "That PDF is larger than 40 MB. Print a shorter date range (one week is ideal).", category: "PDF_TOO_LARGE" });
       return;
     }
     setBusy("Reading PDF on this device…");
     try {
-      const pages = await extractPdfText(f, (p, n) => setBusy(`Reading page ${p} of ${n}…`));
-      const r = parseAgenda(pages, { dateOrder: settings.csvDateOrder });
-      const newPeriod = r.period ?? period;
-      if (r.period) setPeriod(r.period);
-      const base = replace ? [] : entries;
-      const known = new Set(base.filter((e) => e.included && e.fingerprint).map((e) => e.fingerprint!));
-      const fresh: TimeEntry[] = r.events.map((ev) => {
-        const e = eventToEntry(ev, projects, settings, rules);
-        if (e.fingerprint && e.included && known.has(e.fingerprint)) {
-          return { ...e, included: false, excludeReason: "Already in this timesheet", notes: [...e.notes, { code: "duplicate", level: "info", message: "Same meeting as an entry already in this timesheet — excluded." }] };
-        }
-        return e;
-      });
-      setEntries([...base, ...fresh]);
-      setLastImport({
-        fileName: f.name,
-        pages: r.pages,
-        meetings: r.events.length,
-        timed: r.events.filter((e) => !e.allDay).length,
-        canceled: r.events.filter((e) => e.canceled).length,
-        allDay: r.events.filter((e) => e.allDay).length,
-        duplicatesRemoved: r.duplicatesRemoved,
-        warnings: [...r.warnings, ...(newPeriod && r.events.some((e) => e.date < newPeriod.start || e.date > newPeriod.end) ? ["Some meetings fall outside the printed date range."] : [])],
-        period: r.period,
-        importedAt: new Date().toISOString(),
-      });
-      setReplace(true);
-      onDone();
+      const x = await extractPdfText(f, (p, n) => setBusy(`Reading page ${p} of ${n}…`));
+      applyResult(parseAgenda(x.pages, { dateOrder: settings.csvDateOrder, stats: x.stats }), f, "text");
     } catch (e) {
-      setError(e instanceof AgendaError ? e.message : `Couldn't read this PDF: ${(e as Error).message}`);
+      setProblem(toProblem(e, f));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runOcr(f: File) {
+    setProblem(null);
+    setBusy("Starting text recognition on this device…");
+    try {
+      const x = await ocrPdf(f, (p) => setBusy(p.status));
+      const r = parseAgenda(x.pages, { dateOrder: settings.csvDateOrder, stats: x.stats, ocr: true });
+      if (x.truncated) r.warnings.push(`Only the first ${OCR_MAX_PAGES} pages were read with text recognition.`);
+      applyResult(r, f, "ocr");
+    } catch (e) {
+      setProblem(toProblem(e, f, true));
     } finally {
       setBusy(null);
     }
@@ -95,8 +163,24 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
             <span>Replace the {entries.length} entries currently in this timesheet (untick to add to them)</span>
           </label>
         )}
-        {error && <div className="mt"><Notice tone="error" title="Couldn't use this PDF">{error}</Notice></div>}
-        {lastImport && !busy && !error && (
+        {problem && (
+          <div className="mt stack-sm" role="alert">
+            <Notice tone="error" title={problem.title}>
+              <p>{problem.message}</p>
+              {problem.category && <p className="small mt">Error category: <code>{problem.category}</code></p>}
+            </Notice>
+            {problem.ocrFile && (
+              <Notice tone="info" title="Optional: read the pages with on-device text recognition">
+                <p>The pages can be read as images right here in your browser (free, nothing is uploaded). It is slower — several seconds per page — and recognised text can contain mistakes, so <strong>every meeting will be flagged for you to check</strong> against your calendar before export.</p>
+                <div className="row gap-sm mt">
+                  <Button size="sm" disabled={Boolean(busy)} onClick={() => runOcr(problem.ocrFile!)}>Read with text recognition</Button>
+                </div>
+              </Notice>
+            )}
+            <ImportDiagnostics diagnostics={problem.diagnostics} category={problem.category} open={problem.kind === "unrecognized"} />
+          </div>
+        )}
+        {lastImport && !busy && !problem && (
           <p className="small muted mt">Last import: {lastImport.fileName} · {lastImport.meetings} meetings · {lastImport.period ? `${toUSDate(lastImport.period.start)} – ${toUSDate(lastImport.period.end)}` : ""} · <button className="link" onClick={onDone}>review →</button></p>
         )}
         <details className="help">
@@ -104,8 +188,8 @@ export function ImportStep({ onDone }: { onDone: () => void }) {
           <ol className="tight small">
             <li>In Outlook, open <strong>Calendar</strong> and go to the week you want.</li>
             <li>Choose <strong>Print</strong> (File → Print, or Home → Print in new Outlook).</li>
-            <li>Set the date range (e.g. Monday–Sunday) and choose the <strong>Detailed agenda</strong> style.</li>
-            <li>Printer: <strong>Microsoft Print to PDF</strong> or <strong>Save as PDF</strong>. Save the file, then drop it here.</li>
+            <li>Set the date range (e.g. Monday–Sunday) and tick <strong>Print detailed agenda</strong> (or choose the <em>Detailed agenda</em> style).</li>
+            <li>Printer: <strong>Save as PDF</strong> (most reliable) or <strong>Microsoft Print to PDF</strong>. Save the file, then drop it here.</li>
           </ol>
           <p className="small">Don&apos;t use the normal day/week/month calendar print — it cuts off titles and doesn&apos;t list exact times.</p>
         </details>

@@ -18,7 +18,7 @@ export interface OcrProgress {
   progress: number;
 }
 
-export type OcrMode = "list" | "calendar";
+export type OcrMode = "list" | "calendar" | "document";
 
 function assetBase(): string {
   return `${window.location.origin}/tesseract`;

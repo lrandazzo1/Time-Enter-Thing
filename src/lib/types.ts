@@ -79,6 +79,7 @@ export interface ImportNote {
     | "unknown-client"
     | "screenshot-time"
     | "screenshot-date"
+    | "pdf-check"
     | "info";
   level: "info" | "warning";
   message: string;
@@ -149,7 +150,7 @@ export interface CalendarEvent {
   /** Redacted source text (title, time line, location/organizer) kept locally for troubleshooting. */
   sourceText?: string;
   /** Extra review notes produced by the parser (e.g. screenshot inference). */
-  parseNotes?: { code: "screenshot-time" | "screenshot-date" | "info"; message: string }[];
+  parseNotes?: { code: "screenshot-time" | "screenshot-date" | "pdf-check" | "info"; message: string }[];
   source: EntrySource;
   sourceLabel?: string;
 

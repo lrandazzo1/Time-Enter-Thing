@@ -10,13 +10,15 @@ import { PNG } from "pngjs";
 import { fromTesseract, type OcrPage } from "@/lib/ocr/types";
 import { chooseScale, enhance } from "@/lib/ocr/enhance";
 import { parseProjectorPages, projectStatus } from "@/lib/projector/parse";
+import { parseAgenda } from "@/lib/pdf/agenda";
+import { ocrToPdfPages } from "@/lib/pdf/extract";
 
 const FIX = "tests/fixtures/projector";
 let worker: Worker;
 
 /** Same pipeline as the browser: decode → enhance (upscale/grayscale/contrast/invert) → OCR. */
-async function ocr(file: string): Promise<OcrPage> {
-  const png = PNG.sync.read(readFileSync(path.join(FIX, file)));
+async function ocr(file: string, dir = FIX): Promise<OcrPage> {
+  const png = PNG.sync.read(readFileSync(path.join(dir, file)));
   const scale = chooseScale(png.width, png.height);
   const e = enhance({ data: png.data, width: png.width, height: png.height }, scale);
   const out = new PNG({ width: e.width, height: e.height });
@@ -88,3 +90,20 @@ describe("OCR limits (real images)", () => {
   }, 60_000);
 
 });
+
+describe("image-only calendar PDF → on-device text recognition → agenda parser", () => {
+  it("reads the meetings, and flags every one for checking", async () => {
+    await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+    const page = await ocr("agenda-image.png", "tests/fixtures/pdf");
+    const r = parseAgenda(ocrToPdfPages([page]), { ocr: true });
+    const got = r.events.map((e) => [e.date, e.start, e.end, e.minutes, e.title]);
+    console.log("agenda OCR →", JSON.stringify(got), "confidence", r.diagnostics.ocr?.meanConfidence);
+    expect(got).toEqual([
+      ["2026-11-02", "09:00", "10:30", 90, "Acme Components | Gears | Forecast model"],
+      ["2026-11-02", "13:00", "14:00", 60, "Globex Corporation weekly sync"],
+      ["2026-11-03", "15:00", "16:00", 60, "Smith-Jones Holdings review"],
+    ]);
+    expect(r.events.every((e) => e.parseNotes?.some((n) => n.code === "pdf-check"))).toBe(true);
+  }, 60_000);
+});
+

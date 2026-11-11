@@ -124,7 +124,7 @@ describe("page boundaries and edge layouts (constructed pages)", () => {
 describe("unsupported PDFs are rejected, never guessed", () => {
   it("calendar-grid print", async () => {
     const pages = await pdfPages(FIX + "calendar-grid.pdf");
-    expect(() => parseAgenda(pages)).toThrow(/not Outlook's Detailed agenda/);
+    expect(() => parseAgenda(pages)).toThrow(/couldn't identify the meeting dates and times.*Print detailed agenda/);
   });
   it("image-only PDF has no readable text", async () => {
     const pages = await pdfPages(FIX + "image-only.pdf");

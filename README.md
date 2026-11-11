@@ -1,4 +1,4 @@
-# Timesheet Converter 2.2.2
+# Timesheet Converter 2.2.3
 
 Turn your Outlook calendar into a reviewed, import-ready **BigTime Enterprise PSA** (formerly Projector PSA) timesheet CSV — free, private, and without any AI service.
 
@@ -11,7 +11,7 @@ Everything runs in the browser.
 
 ## Weekly workflow
 
-1. **Upload calendar PDF** — in Outlook: open Calendar → go to the week → **Home → Print** (or File → Print) → set the start/end dates → Print style **Detailed agenda** → printer **Microsoft Print to PDF** (Windows) or **Save as PDF** (Mac) → save → upload. Don't use the day/week/month grid styles: they cut titles off and are rejected with an explanation. Scanned/image-only PDFs are rejected with *“This PDF doesn't contain readable meeting details. Please export from Outlook using Detailed agenda.”* — there is no OCR fallback.
+1. **Upload calendar PDF** — in Outlook: open Calendar → go to the week → **Home → Print** (or File → Print) → set the start/end dates → tick **Print detailed agenda** (or choose the *Detailed agenda* style) → printer **Save as PDF** (most reliable) or **Microsoft Print to PDF** → save → upload. The parser recognises several Outlook layouts (date and time on one line or on separate lines, a time column under day headings, US / day-first / ISO / month-name dates, 12- and 24-hour times, browser headers and footers). Failures are told apart: *no selectable text*, *text that can't be decoded*, *text read but meetings not recognised* (with content-free **import diagnostics** that can be copied), and *some meetings couldn't be interpreted* (the rest is imported and the problem lines are listed). For PDFs without usable text, optional **on-device text recognition** (Tesseract.js, self-hosted) reads the pages as images; every meeting read that way is flagged and must be approved individually.
 2. **Review extracted meetings** — meetings found, dates covered, duplicates removed, overlaps flagged. Canceled meetings (“Canceled: …”) and all-day events (PTO, holidays) are excluded by default and listed separately; each can be included.
 3. **Match projects** — saved rules, project codes, `CLIENT | TASK | DESCRIPTION` titles, project names and aliases, the organizer's company and e-mail domain, then fuzzy suggestions. Anything ambiguous is a manual choice; a project with one task is preselected, several tasks need confirmation. Your own company's name on its own never selects the internal project.
 4. **Review hours** — edit date, description, project, task, start, end, hours and location; scheduled vs confirmed time; totals per day and project. Overlapping meetings are never counted twice: keep one meeting, split the overlap, exclude one, or edit the times.
@@ -31,7 +31,7 @@ The in-app **Help** page has an illustrated step-by-step version of this.
 
 The importer uses the `Report` sheet (or any sheet with *Project* and *Task Name* columns), takes the project code from the final parentheses in the Project column (`Globex - Adaptive Planning - MSP (P005678-001)` → `P005678-001`), keeps task names exactly, suggests the location from *Work Location*, keeps *Role* only as reference, uses *Resource Display Name* (if present) only to let you pick yourself when a report contains several people, and shows the date range and filters from the `Options` sheet. A time card report is history, not an assignment list: projects you haven't charged time to in the date range won't be in it — upload a newer report later (also possible from the Match step) and new projects/tasks are merged into what's saved. `.xlsx` and `.xlsm` are read as data only; macros are never run. Menu names can vary slightly between Projector versions.
 
-There is no server-side code, no database, no account, no API key and no environment variable. Calendar PDFs, Projector reports and screenshots never leave the device: the pdf.js worker is served from this site's own `/pdfjs/` folder, project-screenshot OCR uses open-source [Tesseract.js](https://github.com/naptha/tesseract.js) from `/tesseract/`, and the site's Content-Security-Policy (`connect-src 'self'`) blocks the page from sending data to any other server.
+There is no server-side code, no database, no account, no API key and no environment variable. Calendar PDFs, Projector reports and screenshots never leave the device: the pdf.js worker is served from this site's own `/pdfjs/` folder, text recognition (project screenshots, and the optional fallback for calendar PDFs without text) uses open-source [Tesseract.js](https://github.com/naptha/tesseract.js) from `/tesseract/`, and the site's Content-Security-Policy (`connect-src 'self'`) blocks the page from sending data to any other server.
 
 ---
 
@@ -75,6 +75,7 @@ OUTLOOK_PDF=/path/to/agenda.pdf npx vitest run tests/pdf.private.test.ts        
 PROJECTOR_REPORT=/path/to/real.xlsx npx vitest run tests/excel.private.test.ts      # optional check with a real report (never commit it)
 python3 scripts/make-excel-fixtures.py      # regenerate the synthetic Excel fixtures (needs openpyxl)
 npm run make-fixtures   # regenerate the synthetic screenshot and PDF fixtures (needs Playwright)
+node scripts/make-pdf-variants.mjs   # regenerate the synthetic Outlook layout variants (needs Playwright)
 ```
 
 `scripts/copy-assets.mjs` copies the pdf.js worker and standard fonts into `public/pdfjs/` and the Tesseract worker, WebAssembly cores and English model into `public/tesseract/` (both are also included in the ZIP so a Drop deploy never depends on a CDN).
@@ -114,7 +115,7 @@ Implement `TimesheetExporter` (`src/lib/exporters/types.ts`) and register it in 
 
 ## Privacy notes
 
-- Calendar PDFs, Projector reports, screenshots, projects and timesheets are processed and stored only in the user's browser (localStorage / IndexedDB cache for the OCR model). The PDF file itself is never stored; only the extracted meetings for the current week are kept, with Teams links, meeting IDs, passcodes, phone numbers and e-mail addresses removed. The CSV contains only the six BigTime columns. Storage is per device and per browser and is erased when site data is cleared — users can download and restore a backup.
+- Calendar PDFs, Projector reports, screenshots, projects and timesheets are processed and stored only in the user's browser (localStorage / IndexedDB cache for the OCR model). The PDF file itself is never stored; only the extracted meetings for the current week are kept, with Teams links, meeting IDs, passcodes, phone numbers and e-mail addresses removed. The CSV contains only the six BigTime columns. Import diagnostics contain counts, the PDF producer name and masked line shapes (every letter and digit replaced) — never titles, attendees, links or passcodes — and are only shown on screen or copied by the user. Storage is per device and per browser and is erased when site data is cleared — users can download and restore a backup.
 - No analytics, telemetry, error reporting, cookies, accounts, AI services or third-party requests.
 - Browser-local storage is not an enterprise security control. Users should confirm their company permits using the tool with client information.
 - No personal project or calendar data is bundled with the app; the screenshots in `public/guide/` are redacted, the Projector example image and all test fixtures and documentation screenshots use fictional data. Real PDFs/reports are only used locally through the optional `*.private.test.ts` checks and are never committed.

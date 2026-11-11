@@ -326,12 +326,20 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
           <li>Select the week you want to record.</li>
           <li>Go to <strong>Home → Print</strong> (or <strong>File → Print</strong>; in new Outlook / Outlook on the web use the calendar&apos;s <strong>Print</strong> button). Set the start and end dates to that week.</li>
           <li>Choose the <strong>Detailed agenda</strong> print style.</li>
-          <li>Save the output as a <strong>PDF</strong> — printer <em>Microsoft Print to PDF</em> (Windows) or <em>Save as PDF</em> (Mac / browser).</li>
+          <li>Save the output as a <strong>PDF</strong> — choose the printer <strong>Save as PDF</strong> (the most reliable; it keeps the text readable). <em>Microsoft Print to PDF</em> usually works too.</li>
           <li>Upload that PDF on <button className="link" onClick={onStart}>Timesheet</button> (<em>Upload Your Outlook Calendar PDF</em>).</li>
         </ol>
         <Notice tone="warning" title="Use “Detailed agenda”, not the calendar grid">
           The standard day / work week / month PDF is the wrong format: meeting names are cut off and precise start and end times are often missing. If you upload a grid PDF (or a scanned PDF without text), the app tells you instead of guessing.
         </Notice>
+        <details className="help">
+          <summary>The upload says the PDF can&apos;t be used</summary>
+          <ul className="guide-steps mt">
+            <li><strong>“doesn&apos;t contain selectable text” / “characters can&apos;t be decoded”</strong> — the PDF printer saved the pages as pictures or without readable characters. Print again and pick <strong>Save as PDF</strong>. If that isn&apos;t possible, use <em>Read with text recognition</em>: the pages are read on your device (nothing is uploaded) and every meeting is flagged for you to check.</li>
+            <li><strong>“couldn&apos;t identify the meeting dates and times”</strong> — the text was read, but the layout wasn&apos;t recognised. Make sure <em>Print detailed agenda</em> is ticked. If it still fails, open <em>Import diagnostics</em> and click <strong>Copy diagnostics</strong>; it contains only counts and masked patterns (no meeting names) and shows what the PDF looks like to the app.</li>
+            <li><strong>“Some meetings couldn&apos;t be interpreted”</strong> — the meetings that were read are imported; the lines listed couldn&apos;t be, so add those hours by hand in Review hours.</li>
+          </ul>
+        </details>
         <p className="small muted">The PDF is read inside your browser and never uploaded. From each meeting the app keeps only its title, date, times, organizer and location; meeting links, passcodes and attendee lists are ignored. Canceled meetings and all-day events (for example colleagues&apos; PTO) are excluded by default but listed so you can include them.</p>
       </Card>
 
@@ -458,7 +466,7 @@ export function SetupGuide({ onStart, onProjects }: { onStart: () => void; onPro
         <span id="help-limits" className="anchor-target" />
         <ul className="guide-steps">
           <li><strong>A time card report is history.</strong> It only contains projects and tasks you charged time to in its date range and statuses. Brand-new assignments appear once you&apos;ve recorded time on them; until then add them by hand or import a newer report.</li>
-          <li><strong>Calendar PDF:</strong> only Outlook&apos;s Detailed agenda is supported. Times are read as printed (your Outlook time zone). Meetings that run past midnight are split by day. Scanned or image-only PDFs have no readable text and are rejected.</li>
+          <li><strong>Calendar PDF:</strong> only Outlook&apos;s Detailed agenda is supported. Times are read as printed (your Outlook time zone). Meetings that run past midnight are split by day. PDFs without selectable text can be read with on-device text recognition, which can make mistakes — every meeting read that way must be checked.</li>
           <li><strong>Calendar time is a proposal.</strong> Every line must be approved before export; adjust hours to what you actually worked.</li>
           <li><strong>Screenshot import</strong> (fallback only) can misread blurry or small text; look-alike characters in codes are flagged for you to check, never silently “fixed”.</li>
         </ul>

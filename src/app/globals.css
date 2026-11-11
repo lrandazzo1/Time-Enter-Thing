@@ -457,3 +457,11 @@ details.source pre { white-space: pre-wrap; background: var(--surface-2); border
   .extract-table td { border: 0; padding: 3px 12px; text-align: left !important; }
   .extract-table td[data-label]::before { content: attr(data-label); display: block; font-size: 0.72rem; font-weight: 650; text-transform: uppercase; color: var(--muted); }
 }
+
+/* Import diagnostics */
+.diag summary { font-size: 0.88rem; }
+.diag-table { border-collapse: collapse; margin-top: 8px; font-size: 0.86rem; }
+.diag-table th { text-align: left; font-weight: 600; color: var(--text-2); padding: 3px 14px 3px 0; vertical-align: top; white-space: nowrap; }
+.diag-table td { padding: 3px 0; overflow-wrap: anywhere; }
+.diag-shapes { font-size: 0.75rem; max-height: 220px; overflow: auto; white-space: pre; }
+@media (max-width: 720px) { .diag-table th { white-space: normal; } }

@@ -66,7 +66,7 @@ export function ExportStep({ onBack, onGuide, onExported }: { onBack: () => void
           </ul>
           <div className="row wrap gap-sm mt">
             <Button size="sm" onClick={onBack}>← Back to review</Button>
-            {unapproved.length > 0 && errors.length === 1 && (
+            {unapproved.length > 0 && errors.length === 1 && !unapproved.some((e) => e.notes.some((n) => n.code === "pdf-check")) && (
               <Button size="sm" variant="primary" onClick={() => {
                 if (window.confirm(`Approve all ${unapproved.length} remaining entries? Only do this if you have checked every line against the time you actually worked.`)) {
                   const ids = new Set(unapproved.map((e) => e.id));

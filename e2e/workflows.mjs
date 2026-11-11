@@ -62,11 +62,11 @@ await shot("pdf-01-upload");
 // unsupported PDFs first
 const pdfInput = page.locator('input[type=file][accept*=".pdf"]');
 await pdfInput.setInputFiles(path.join(FIX, "pdf", "calendar-grid.pdf"));
-await page.getByText(/not Outlook's Detailed agenda/).waitFor();
-check("calendar-grid PDF rejected with an explanation", true);
+await page.getByText(/couldn't identify the meeting dates and times/).waitFor();
+check("calendar-grid PDF: read, but meetings not recognised (with a Print detailed agenda hint)", (await page.getByText(/Print detailed agenda” ticked/).count()) === 1);
 await pdfInput.setInputFiles(path.join(FIX, "pdf", "image-only.pdf"));
-await page.getByText("This PDF doesn't contain readable meeting details. Please export from Outlook using Detailed agenda.").waitFor();
-check("image-only PDF rejected with the required message", true);
+await page.getByText("This PDF doesn't contain selectable text. Try saving it directly from Outlook using Print detailed agenda.").waitFor();
+check("image-only PDF: 'no selectable text' message, text recognition offered", (await page.getByRole("button", { name: "Read with text recognition" }).count()) === 1);
 await pdfInput.setInputFiles(path.join(FIX, "pdf", "malformed.pdf"));
 await page.getByText(/couldn't be opened as a PDF/).waitFor();
 check("malformed PDF rejected", true);
@@ -176,6 +176,49 @@ for (const hash of ["#home", "#projects", "#help"]) {
   check(`mobile ${hash}: no horizontal scroll`, sw <= 390, `scrollWidth ${sw}`);
 }
 await mp.screenshot({ path: path.join(OUT, "pdf-mobile-review.png"), fullPage: false });
+
+/* ---------- PDF compatibility: other layouts, partial imports, failures, text recognition ---------- */
+{
+  const c3 = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+  const p3 = await c3.newPage();
+  p3.on("pageerror", (e) => errors.push(e.message));
+  await p3.goto(BASE);
+  await p3.evaluate(() => localStorage.setItem("tsc.v1.settings", JSON.stringify({ onboarding: "done" })));
+  await p3.reload();
+  const input = p3.locator('input[type=file][accept*=".pdf"]');
+  const again = async () => {
+    if (await p3.getByRole("button", { name: "← Upload a different PDF" }).count()) await p3.getByRole("button", { name: "← Upload a different PDF" }).click();
+    await input.waitFor({ state: "attached" });
+  };
+  await input.setInputFiles(path.join(FIX, "pdf", "variant-alt-dates.pdf"));
+  await p3.getByText("Meetings to review (7)").waitFor();
+  check("other Outlook date/time formats + browser header/footer import", true);
+  await again();
+  await input.setInputFiles(path.join(FIX, "pdf", "variant-split-lines.pdf"));
+  await p3.getByText("Meetings to review (5)").waitFor();
+  check("date and time on separate lines, page-spanning event import", true);
+  await again();
+  await input.setInputFiles(path.join(FIX, "pdf", "variant-partial.pdf"));
+  await p3.getByText("Some meetings couldn't be interpreted. Review the flagged items before exporting.").waitFor();
+  check("partly interpretable PDF: valid meetings imported, the rest listed and flagged", (await p3.locator(".notice", { hasText: "Mon 11/2/2026 2:00 PM" }).count()) >= 1 && (await p3.locator(".extract-table .badge", { hasText: "Check" }).count()) >= 1);
+  await again();
+  await input.setInputFiles(path.join(FIX, "pdf", "variant-unrecognized.pdf"));
+  await p3.getByText("We were able to read this PDF, but couldn't identify the meeting dates and times. Your Outlook export may use a different format.").waitFor();
+  const diagText = await p3.locator("details.diag").innerText();
+  check("readable but unrecognised: specific message + diagnostics without meeting content", /Day headings\s*2/.test(diagText) && /Selectable text found\s*yes/.test(diagText) && !/Acme|Globex|Smith|Thirty/.test(diagText), diagText.split("\n").slice(0, 3).join(" | "));
+  await input.setInputFiles(path.join(FIX, "pdf", "variant-undecodable.pdf"));
+  await p3.getByText(/its characters can't be decoded/).waitFor();
+  check("undecodable text identified separately", true);
+  await input.setInputFiles(path.join(FIX, "pdf", "variant-image-agenda.pdf"));
+  await p3.getByText("This PDF doesn't contain selectable text. Try saving it directly from Outlook using Print detailed agenda.").waitFor();
+  const tOcr = Date.now();
+  await p3.getByRole("button", { name: "Read with text recognition" }).click();
+  await p3.getByText("Meetings to review (3)").waitFor({ timeout: 180000 });
+  const checks = await p3.locator(".extract-table .badge", { hasText: "Check" }).count();
+  check("image-only PDF read with on-device text recognition; every meeting flagged", checks === 3 && (await p3.getByText("Read with on-device text recognition").count()) === 1, `${(Date.now() - tOcr) / 1000}s, ${checks} flagged`);
+  await p3.screenshot({ path: path.join(OUT, "pdf-06-ocr.png"), fullPage: true });
+  await c3.close();
+}
 
 /* ---------- optional real files (never stored) ---------- */
 const realPdf = process.env.PRIVATE_PDF;

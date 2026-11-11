@@ -5,6 +5,8 @@ import { Badge, Button, Card, Notice } from "./ui";
 import type { TimeEntry } from "@/lib/types";
 import { findOverlaps } from "@/lib/review";
 import { formatDecimalHours, prettyDate, toUSDate } from "@/lib/time";
+import { PARTIAL_MESSAGE } from "@/lib/pdf/agenda";
+import { ImportDiagnostics } from "./ImportDiagnostics";
 
 /** Step 2 — what was read from the PDF: meetings, dates covered, canceled/all-day exclusions, warnings. */
 export function ExtractStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
@@ -37,6 +39,23 @@ export function ExtractStep({ onNext, onBack }: { onNext: () => void; onBack: ()
         <div className="stat"><span className="stat-label">All-day</span><span className="stat-value">{lastImport?.allDay ?? 0}</span><span className="stat-sub">PTO, holidays — excluded</span></div>
       </div>
 
+      {lastImport?.method === "ocr" && (
+        <Notice tone="warning" title="Read with on-device text recognition">
+          This PDF had no usable text, so its pages were read as images. Every meeting below is flagged: compare its title, date and times with your calendar before approving it.
+          {lastImport.diagnostics?.ocr && lastImport.diagnostics.ocr.meanConfidence < 75 && <> Recognition confidence was low ({lastImport.diagnostics.ocr.meanConfidence}%).</>}
+        </Notice>
+      )}
+      {((lastImport?.rejected?.length ?? 0) > 0 || ((lastImport?.flagged ?? 0) > 0 && lastImport?.method !== "ocr")) && (
+        <Notice tone="warning" title={PARTIAL_MESSAGE}>
+          {(lastImport!.flagged ?? 0) > 0 && <p>{lastImport!.flagged} meeting{lastImport!.flagged === 1 ? " was" : "s were"} read but need{lastImport!.flagged === 1 ? "s" : ""} checking (marked <strong>Check</strong> below and in Review hours).</p>}
+          {(lastImport!.rejected?.length ?? 0) > 0 && (
+            <>
+              <p>{lastImport!.rejected!.length} line{lastImport!.rejected!.length === 1 ? "" : "s"} looked like a meeting time but couldn&apos;t be interpreted, so no time was added for {lastImport!.rejected!.length === 1 ? "it" : "them"}. Add the time manually in Review hours if it was work:</p>
+              <ul className="tight small">{lastImport!.rejected!.slice(0, 20).map((r, i) => <li key={i}>Page {r.page}: “{r.text}” — {r.reason}</li>)}</ul>
+            </>
+          )}
+        </Notice>
+      )}
       {(lastImport?.warnings.length ?? 0) > 0 && (
         <Notice tone="warning" title="Check these">
           <ul className="tight">{lastImport!.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
@@ -67,6 +86,7 @@ export function ExtractStep({ onNext, onBack }: { onNext: () => void; onBack: ()
                   <td data-label="Time" className="nowrap">{e.intervals.map((i) => `${i.start}–${i.end}`).join(", ") || "—"}</td>
                   <td data-label="Meeting">
                     {e.title}
+                    {e.notes.filter((n) => n.code === "pdf-check").map((n, i) => <div key={i} className="row-note text-warning"><Badge tone="warning">Check</Badge> {n.message}</div>)}
                     {e.notes.some((n) => n.code === "crosses-midnight") && <div className="row-note text-warning">Runs past midnight — split by day.</div>}
                     {e.sourceText && (
                       <details className="source"><summary>Source</summary><pre>{e.sourceText}</pre></details>
@@ -103,6 +123,8 @@ export function ExtractStep({ onNext, onBack }: { onNext: () => void; onBack: ()
           </ul>
         )}
       </Card>
+
+      {lastImport?.diagnostics && <ImportDiagnostics diagnostics={lastImport.diagnostics} />}
 
       <div className="row space-between wrap gap">
         <Button onClick={onBack}>← Upload a different PDF</Button>

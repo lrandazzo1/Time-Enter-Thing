@@ -66,7 +66,8 @@ export function ReviewStep({ onNext, onBack }: { onNext: () => void; onBack: () 
   const t = useMemo(() => totals(entries, projects), [entries, projects]);
   const daily = useMemo(() => dailyTotals(entries), [entries]);
   const errorCount = issues.filter((i) => i.level === "error").length;
-  const readyIds = entries.filter((e) => e.included && !e.confirmed && e.projectId && e.task && e.minutes > 0 && !errorsById.has(e.id)).map((e) => e.id);
+  // Meetings the PDF parser flagged (text recognition, uncertain title…) must be approved one by one.
+  const readyIds = entries.filter((e) => e.included && !e.confirmed && e.projectId && e.task && e.minutes > 0 && !errorsById.has(e.id) && !e.notes.some((n) => n.code === "pdf-check")).map((e) => e.id);
   const unapproved = entries.filter((e) => e.included && !e.confirmed).length;
 
   // Changing what an entry claims un-approves it, so approval always reflects the final values.

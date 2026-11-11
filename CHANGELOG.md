@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.2.3 — Calendar PDF compatibility fix
+
+### Fixed
+- A correctly exported Outlook *Detailed agenda* PDF could be rejected with “doesn't contain readable meeting details”. That message was produced by three different conditions (no text in the PDF; text made only of characters the parser discards; text read but no meeting recognised) — the last one simply meant the layout differed from the original sample.
+- The parser no longer depends on one exact line format. Dates and times are recognised as tokens in several notations (`Mon 11/2/2026`, `Mon 2026-11-02`, `Monday, November 2, 2026`, `Mon, Nov 2, 2026`, `2 November 2026`, `2-Nov-26`, day-first dates resolved by the printed weekday; `9:30 AM`, `9:30AM`, `9 AM`, `13:00`, `9:30 - 11:00 AM`, `to`), and three layouts are supported: date + time on one line, the date and the time on separate lines, and a time column under day headings with the title beside the time. Titles are found by larger font, bold font, position beside the time, or (flagged) the line above. Browser print headers/footers and page numbers are ignored; per-glyph text without widths (some PDF printers) is reassembled into words.
+
+### Added
+- Specific messages: no selectable text; text that can't be decoded; *“We were able to read this PDF, but couldn't identify the meeting dates and times…”*; *“Some meetings couldn't be interpreted. Review the flagged items before exporting.”* (valid meetings are imported, problem lines listed); technical error categories for extraction failures (`PDF_PASSWORD`, `PDF_INVALID`, `PDF_WORKER`, `PDF_PAGE_TEXT`, `PDF_TOO_LARGE`, …).
+- **Import diagnostics** panel (pages, text items, readable characters, PDF producer, date/time patterns, candidates, parsed/flagged/rejected meetings with reasons, masked line shapes) with **Copy diagnostics** — no meeting content.
+- Optional **on-device text recognition** for PDFs without usable text (pages rendered with pdf.js and read with the self-hosted Tesseract.js; nothing uploaded). Every meeting read this way is flagged, can't be bulk-approved, and low confidence is reported.
+- Help: *Save as PDF* recommended as the printer; troubleshooting for each message.
+- Tests: synthetic PDFs for alternative date formats, split title fragments, separate date/time lines, several events per page, page-spanning events, canceled and overlapping meetings, classic time-column layout, partly interpretable, readable-but-unrecognised, undecodable and image-only PDFs; per-glyph and shuffled text; real Tesseract OCR of an image-only agenda; browser tests for each message and for text recognition. The original PDF still parses identically.
+
 ## 2.2.2 — Help page: Projector report tutorial
 
 ### Changed
